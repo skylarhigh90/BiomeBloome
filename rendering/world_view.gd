@@ -39,6 +39,7 @@ func setup(p_systems: GameSystems) -> void:
 	simulation.entity_added.connect(_on_entity_added)
 	simulation.entity_removed.connect(_on_entity_removed)
 	simulation.plant_eaten.connect(_on_plant_eaten)
+	simulation.plant_state_changed.connect(_on_plant_state_changed)
 	systems.world_expanded.connect(_on_world_expanded)
 	_generate_details()
 	queue_redraw()
@@ -102,6 +103,17 @@ func _on_entity_removed(kind: String, _entity_id: int, position: Vector2, cause:
 func _on_plant_eaten(_plant_id: int, position: Vector2) -> void:
 	if ambient_effects.size() < 28:
 		ambient_effects.append({"type": "nibble", "position": position, "age": 0.0, "duration": 0.42})
+
+func _on_plant_state_changed(_plant_id: int, _previous_state: String, new_state: String, position: Vector2) -> void:
+	if new_state not in ["depleted", "recovering", "healthy"] or ambient_effects.size() >= 28:
+		return
+	ambient_effects.append({
+		"type": "plant_state",
+		"state": new_state,
+		"position": position,
+		"age": 0.0,
+		"duration": 1.05 if new_state == "depleted" else 1.35,
+	})
 
 func _on_world_expanded(_new_radius: float) -> void:
 	expansion_flash = 2.2
@@ -344,20 +356,79 @@ func _draw_plants() -> void:
 		var position: Vector2 = plant["position"]
 		if simulation.terrain.is_deep_water(position):
 			continue
-		var fullness: float = clampf(plant["food"] / plant["max_food"], 0.08, 1.0)
+		# Current stock changes the plant silhouette. Habitat quality has its own
+		# stable ground footprint, so a poor site cannot be mistaken for grazing.
+		var stock_ratio := simulation.plant_stock_ratio(plant)
+		var ecology_state := simulation.plant_ecology_state(plant)
+		var habitat_quality := _plant_habitat_quality(plant)
 		var scale_factor := _spawn_scale(plant["id"])
 		draw_set_transform(position, 0.0, Vector2.ONE * scale_factor)
 		if plant["type"] == "carrot_patch":
-			_draw_carrot_patch(fullness, plant["id"])
+			_draw_carrot_patch(stock_ratio, ecology_state, plant["id"], habitat_quality)
 		else:
-			_draw_berry_bush(fullness, plant["id"])
+			_draw_berry_bush(stock_ratio, ecology_state, plant["id"], habitat_quality)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
-func _draw_carrot_patch(fullness: float, entity_id: int) -> void:
+func _plant_habitat_quality(plant: Dictionary) -> float:
+	var suitability_cfg: Dictionary = simulation.config.get("terrain", {}).get("food_suitability", {})
+	var poor := float(suitability_cfg.get("poor_capacity_factor", 0.48))
+	var rich := float(suitability_cfg.get("rich_capacity_factor", 1.28))
+	return clampf(inverse_lerp(poor, rich, float(plant.get("habitat_capacity_factor", 1.0))), 0.0, 1.0)
+
+func _habitat_quality_at(plant_type: String, position: Vector2) -> float:
+	var suitability_cfg: Dictionary = simulation.config.get("terrain", {}).get("food_suitability", {})
+	var poor := float(suitability_cfg.get("poor_capacity_factor", 0.48))
+	var rich := float(suitability_cfg.get("rich_capacity_factor", 1.28))
+	var capacity := simulation.terrain.food_capacity_factor(plant_type, position)
+	return clampf(inverse_lerp(poor, rich, capacity), 0.0, 1.0)
+
+func _draw_plant_habitat_footprint(plant_type: String, quality: float, entity_id: int) -> void:
+	# The footprint is established at placement and never changes with grazing.
+	# Fertile sites retain a broad green verge; poor sites retain pale compacted soil.
+	var radius := lerpf(13.0, 17.5, quality)
+	var ground := Color("#9a8156").lerp(Color("#5d844a"), quality)
+	draw_circle(Vector2(1.2, 4.2), radius + 1.8, Color(0.06, 0.14, 0.09, 0.13))
+	draw_circle(Vector2.ZERO, radius, Color(ground.r, ground.g, ground.b, 0.50))
+	draw_arc(Vector2.ZERO, radius - 1.2, 0.0, TAU, 28, Color(0.83, 0.89, 0.58, 0.12 + quality * 0.20), 1.4, true)
+	if quality < 0.42:
+		for index in range(3):
+			var angle := float(index) / 3.0 * TAU + float(entity_id) * 0.31
+			var start := Vector2.from_angle(angle) * (5.5 + float(index % 2) * 2.0)
+			draw_line(start, start + Vector2.from_angle(angle + 0.55) * 4.2, Color(0.34, 0.27, 0.16, 0.38), 1.1, true)
+	elif quality > 0.62:
+		for index in range(5):
+			var angle := float(index) / 5.0 * TAU + float(entity_id) * 0.19
+			var base := Vector2.from_angle(angle) * (radius - 2.2)
+			var height := 2.8 + quality * 2.3
+			draw_line(base, base + Vector2(sin(angle) * 1.4, -height), Color(0.31, 0.58, 0.28, 0.58), 1.2, true)
+	# Berries favor a slightly leafier permanent verge; this is species identity,
+	# not a stock indication.
+	if plant_type == "berry_bush" and quality > 0.52:
+		draw_circle(Vector2(-radius * 0.62, 2.5), 2.2, Color(0.35, 0.61, 0.31, 0.42))
+
+func _draw_carrot_patch(stock_ratio: float, ecology_state: String, entity_id: int, habitat_quality: float) -> void:
 	var sway := sin(visual_clock * 1.3 + entity_id) * 0.55
-	draw_circle(Vector2(1.0, 5.0), 10.0, Color(0.08, 0.16, 0.10, 0.15))
-	draw_colored_polygon(PackedVector2Array([Vector2(-10.0, 2.0), Vector2(-6.0, -1.0), Vector2(6.5, -1.0), Vector2(10.0, 2.5), Vector2(7.0, 7.0), Vector2(-7.5, 7.0)]), Color("#755637"))
-	var carrot_count := 1 + int(round(fullness * 3.0))
+	_draw_plant_habitat_footprint("carrot_patch", habitat_quality, entity_id)
+	var disturbed_soil := Color("#745238") if ecology_state in ["depleted", "recovering"] else Color("#765b3b")
+	draw_colored_polygon(PackedVector2Array([Vector2(-11.0, 2.0), Vector2(-6.5, -2.0), Vector2(7.0, -1.5), Vector2(11.0, 2.5), Vector2(7.5, 7.5), Vector2(-8.0, 7.0)]), disturbed_soil)
+	if ecology_state == "depleted":
+		# Cropped stems and empty disturbed earth: never draw an edible root here.
+		for index in range(3):
+			var x := -6.0 + float(index) * 6.0
+			draw_line(Vector2(x, 1.0), Vector2(x + (1.0 if index % 2 == 0 else -1.0), -2.2), Color("#65703b"), 1.8, true)
+			draw_line(Vector2(x - 1.6, -1.5), Vector2(x + 1.7, -0.8), Color("#4d5432"), 1.1, true)
+		draw_arc(Vector2(0.0, 2.5), 8.2, 0.25, 2.7, 9, Color(0.36, 0.24, 0.15, 0.62), 1.2, true)
+		return
+	if ecology_state == "recovering":
+		# Fresh shoots have a bright, low silhouette and no orange root.
+		for index in range(3):
+			var x := -5.2 + float(index) * 5.2
+			var height := 3.8 + float(index % 2) * 1.8
+			draw_line(Vector2(x, 0.5), Vector2(x - 1.8 + sway * 0.35, 0.5 - height), Color("#83b955"), 1.8, true)
+			draw_line(Vector2(x, 0.5), Vector2(x + 2.0 + sway * 0.35, -2.4), Color("#a5cf66"), 1.5, true)
+		draw_circle(Vector2(7.5, 4.0), 1.35 + sin(visual_clock * 2.2 + entity_id) * 0.18, Color(0.84, 0.94, 0.45, 0.72))
+		return
+	var carrot_count := 4 if ecology_state == "abundant" else (3 if ecology_state == "healthy" else (2 if stock_ratio >= 0.20 else 1))
 	var offsets_by_count := {
 		1: [0.0],
 		2: [-4.0, 4.0],
@@ -377,13 +448,35 @@ func _draw_carrot_patch(fullness: float, entity_id: int) -> void:
 		draw_colored_polygon(PackedVector2Array([top + Vector2(-2.4, 0.0), top + Vector2(2.4, 0.0), top + Vector2(1.4, 4.2), top + Vector2(0.0, 8.3), top + Vector2(-1.5, 4.0)]), root_color)
 		draw_line(top + Vector2(-1.1, 2.0), top + Vector2(1.1, 1.7), Color(1.0, 0.72, 0.35, 0.72), 0.9, true)
 
-func _draw_berry_bush(fullness: float, entity_id: int) -> void:
-	draw_circle(Vector2(1.5, 3.0), 11.0, Color(0.1, 0.2, 0.12, 0.16))
-	for index in range(6):
-		var angle := float(index) / 6.0 * TAU + entity_id * 0.1
-		var center := Vector2.from_angle(angle) * 5.0
-		draw_circle(center, 6.5, Color("#326444").lerp(Color("#477b50"), float(index % 2) * 0.35))
-	var berry_count := int(round(fullness * 7.0))
+func _draw_berry_bush(stock_ratio: float, ecology_state: String, entity_id: int, habitat_quality: float) -> void:
+	_draw_plant_habitat_footprint("berry_bush", habitat_quality, entity_id)
+	var depleted := ecology_state == "depleted"
+	var recovering := ecology_state == "recovering"
+	var sparse := ecology_state == "sparse"
+	var branch_count := 3 if depleted else (4 if recovering or sparse else (7 if ecology_state == "abundant" else 6))
+	var branch_length := 5.5 if depleted else (7.0 if recovering else 9.5)
+	for index in range(branch_count):
+		var angle := float(index) / float(branch_count) * TAU + float(entity_id) * 0.1
+		draw_line(Vector2(0.0, 3.0), Vector2.from_angle(angle) * branch_length, Color("#594832"), 1.5, true)
+	var leaf_count := 1 if depleted else (3 if recovering else (4 if sparse else (7 if ecology_state == "abundant" else 6)))
+	var leaf_radius := 3.4 if depleted else (4.2 if recovering or sparse else 5.8)
+	for index in range(leaf_count):
+		var angle := float(index) / float(maxi(1, leaf_count)) * TAU + float(entity_id) * 0.1
+		var center := Vector2.from_angle(angle) * (4.3 if depleted else 5.4)
+		var leaf_color := Color("#607146") if depleted else (Color("#86b957") if recovering else Color("#326444").lerp(Color("#477b50"), float(index % 2) * 0.35))
+		draw_circle(center, leaf_radius, leaf_color)
+		if recovering:
+			draw_circle(center + Vector2(-1.0, -1.1), 1.15, Color(0.76, 0.91, 0.49, 0.72))
+	if depleted:
+		for index in range(2):
+			var x := -4.5 + float(index) * 9.0
+			draw_line(Vector2(x, 4.0), Vector2(x + 2.0, 0.5), Color("#7b6743"), 1.8, true)
+		return
+	if recovering:
+		# New foliage is the recovery cue; fruit does not return until usable.
+		draw_circle(Vector2(0.0, -7.0), 1.7 + sin(visual_clock * 2.0 + entity_id) * 0.2, Color("#d4e86b"))
+		return
+	var berry_count := 7 if ecology_state == "abundant" else (4 if ecology_state == "healthy" else (2 if stock_ratio >= 0.20 else 1))
 	for index in range(berry_count):
 		var angle := float(index) * 2.399 + entity_id * 0.7
 		var position := Vector2.from_angle(angle) * (2.5 + float(index % 3) * 2.2)
@@ -519,6 +612,16 @@ func _draw_effects() -> void:
 		elif effect["type"] == "nibble":
 			var color := Color(1.0, 0.94, 0.67, (1.0 - progress) * 0.55)
 			draw_circle(effect["position"] + Vector2(0.0, -9.0 - progress * 7.0), 2.1 * (1.0 - progress), color)
+		elif effect["type"] == "plant_state":
+			var state: String = effect.get("state", "")
+			var base_color := Color("#9c7951") if state == "depleted" else (Color("#a7d65f") if state == "recovering" else Color("#d7e77a"))
+			var color := Color(base_color.r, base_color.g, base_color.b, (1.0 - progress) * 0.58)
+			var radius := lerpf(8.0, 18.0, progress)
+			draw_arc(effect["position"], radius, -2.75, -0.35, 16, color, 2.0, true)
+			if state != "depleted":
+				for spark in range(3):
+					var angle := float(spark) / 3.0 * TAU + progress * 0.7
+					draw_circle(effect["position"] + Vector2.from_angle(angle) * radius * 0.62 + Vector2(0.0, -progress * 5.0), 1.5 * (1.0 - progress), color)
 	if expansion_flash > 0.0:
 		var progress := 1.0 - expansion_flash / 2.2
 		var radius := lerpf(display_radius - 35.0, display_radius + 8.0, progress)
@@ -546,6 +649,7 @@ func _draw_debug() -> void:
 	draw_circle(position, 15.0, color, false, 2.0, true)
 	if debug_selected_kind == "rabbit":
 		draw_circle(position, simulation.config["rabbit"]["food_detection_radius"], Color(0.55, 0.9, 0.55, 0.22), false, 1.0, true)
+		draw_circle(position, simulation.config["rabbit"].get("social_proximity_radius", 0.0), Color(0.45, 0.78, 0.96, 0.24), false, 1.0, true)
 		draw_circle(position, simulation.config["rabbit"]["fox_detection_radius"], Color(1.0, 0.55, 0.4, 0.28), false, 1.0, true)
 	else:
 		draw_circle(position, simulation.config["fox"]["prey_detection_radius"], Color(1.0, 0.62, 0.35, 0.24), false, 1.0, true)
@@ -586,11 +690,11 @@ func _draw_placement_preview() -> void:
 	draw_set_transform(placement_position, 0.0, Vector2.ONE * 1.02)
 	match placement_item:
 		"rabbit":
-			_draw_rabbit({"id": 0, "velocity": Vector2.RIGHT, "behavior": "preview"})
+			_draw_rabbit({"id": 0, "velocity": Vector2.RIGHT, "behavior": "preview", "hunger": 0.0})
 		"fox":
-			_draw_fox({"id": 0, "velocity": Vector2.RIGHT, "behavior": "preview"})
+			_draw_fox({"id": 0, "velocity": Vector2.RIGHT, "behavior": "preview", "hunger": 0.0})
 		"carrot_patch":
-			_draw_carrot_patch(1.0, 0)
+			_draw_carrot_patch(1.0, "abundant", 0, _habitat_quality_at("carrot_patch", placement_position))
 		"berry_bush":
-			_draw_berry_bush(1.0, 0)
+			_draw_berry_bush(1.0, "abundant", 0, _habitat_quality_at("berry_bush", placement_position))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

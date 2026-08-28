@@ -63,11 +63,4 @@ func configure(shortcut_text: String) -> BiomeRewardChoiceCard:
 	contents.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	contents.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	manifest.add_child(contents)
-
-	var action := Label.new()
-	action.text = "CHOOSE THIS BUNDLE   →"
-	action.theme_type_variation = "EyebrowAccent"
-	action.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	action.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	manifest.add_child(action)
 	return self

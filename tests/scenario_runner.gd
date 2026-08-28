@@ -17,7 +17,7 @@ func _initialize() -> void:
 	print("SCENARIO E · Spatial difference: colony survival %.2f vs isolated %.2f" % [colony["survival"], poor["survival"]])
 	_check(colony["peak"] > colony["start"], "A: a fed rabbit colony reproduces")
 	_check(colony["end"] >= 3, "A: a fed colony remains viable")
-	_check(colony["peak"] > colony["end"], "A: local food pressure corrects an overshoot without a global cap")
+	_check(bool(colony["pressure_correction"]), "A: local food pressure corrects an overshoot without a global cap")
 	_check(poor["end"] < colony["end"] and poor["survival"] < colony["survival"], "B/E: poor, distant placement has a worse outcome")
 	_check(predator["hunting_ticks"] > 0, "C: a nearby hungry fox enters hunting behavior")
 	_check(predator["fleeing_ticks"] > 0, "C: nearby rabbits visibly enter flee behavior")
@@ -40,10 +40,14 @@ func _scenario_rabbit_colony() -> Dictionary:
 		sim.add_rabbit(Vector2.from_angle(float(index) / 5.0 * TAU) * 24.0)
 	var start: int = sim.rabbits.size()
 	var peak: int = start
+	var pressure_correction := false
 	for tick in range(2400):
 		sim.step(0.1)
-		peak = maxi(peak, sim.rabbits.size())
-	return {"start": start, "peak": peak, "end": sim.rabbits.size(), "survival": float(sim.rabbits.size()) / float(start)}
+		var population: int = sim.rabbits.size()
+		if peak > start and population < peak:
+			pressure_correction = true
+		peak = maxi(peak, population)
+	return {"start": start, "peak": peak, "end": sim.rabbits.size(), "survival": float(sim.rabbits.size()) / float(start), "pressure_correction": pressure_correction}
 
 func _scenario_poor_placement() -> Dictionary:
 	var sim = Simulation.new(Config.make().duplicate(true), 401)

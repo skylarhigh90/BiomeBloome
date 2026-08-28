@@ -11,9 +11,10 @@ The canonical UI layer is now:
 - `ui/theme/biome_theme.gd`: semantic color, typography, spacing, radius, surface, button, progress, and state definitions. `BiomeTheme.create()` returns the Godot `Theme` inherited by the full HUD.
 - `ui/components/hud_stat.gd`: icon plus prominent numeric value.
 - `ui/components/hud_status.gd`: category, primary status, and optional secondary status.
-- `ui/components/instruction_callout.gd`: semantic instruction/callout layout with icon, eyebrow, title, and detail.
+- `ui/components/instruction_callout.gd`: optional stand-alone contextual callout; it is not nested inside the checkpoint shell.
+- `ui/components/checkpoint_progress.gd`: compact task/status checklist with population glyphs, hold progress, and a next-action footer.
 - `ui/components/inventory_card.gd`: placement item with icon, title, quantity, selection, hover/focus, and unavailable states.
-- `ui/components/reward_choice_card.gd`: container-backed reward manifest with role, shortcut badge, contents, and action copy.
+- `ui/components/reward_choice_card.gd`: container-backed reward manifest with role, shortcut badge, and contents.
 - `ui/components/icon_text_button.gd`: container-backed button content for an icon and semantic label, used by the reward peek action.
 - `ui/game_hud.gd`: gameplay composition and state binding. It chooses semantic variations and updates content; it should not define a second visual language.
 
@@ -82,21 +83,43 @@ Radius tokens are 8 (`small`), 12 (`control`), 18 (`card`), 22 (`panel`), and 28
 - `SurfaceHUD`: dark translucent HUD tray.
 - `SurfaceHUDLight`: light translucent stat pill.
 - `SurfaceInformation`: cool supply/status surface.
-- `SurfaceCallout`: warm instruction, objective, or warning callout.
+- `SurfaceCallout`: warm stand-alone instruction or warning callout; never a nested checkpoint card.
 - `SurfaceDanger`: ecosystem-critical message.
 - `SurfaceToast` / `SurfaceToastMajor`: short feedback with tiered emphasis.
 - `SurfaceDebug`: development-only exact evaluator detail.
 - `SurfaceRewardSheet` / `SurfaceRewardSeal`: the reward modal and its circular identity mark.
 - `SurfacePeekHUD`: compact paused-meadow status while reward choices are hidden.
-- `ObjectiveStepFuture` / `ObjectiveStepCurrent` / `ObjectiveStepComplete`: ordered objective-step state.
 
 An accent surface communicates meaning; it is not decoration to add arbitrarily.
 
 ## Components and states
 
-`BiomeHUDStat` is used for rabbit and fox populations. `BiomeHUDStatus` is used for rabbit forage state. `BiomeInstructionCallout` is the reusable checkpoint action area and can also support hint, warning, critical, new mechanic, or recommended-action copy by choosing an appropriate semantic surface. `BiomeInventoryCard` is used by every unlocked placement item. `BiomeRewardChoiceCard` owns each reward manifest, including its shortcut badge and container layout. `BiomeIconTextButton` owns compound icon-plus-label button content. The supply timer, reward sheet, toast, modal, and compact speed controls consume shared Theme variations.
+`BiomeHUDStat` is used for rabbit and fox populations. `BiomeHUDStatus` is used for rabbit forage state. `BiomeCheckpointProgress` sits directly in the cream checkpoint shell and owns the `DO THIS`, `KEEP`, and `FINISH` sections, population glyphs, hold bar, and next-action footer. `BiomeInstructionCallout` remains available for a genuinely separate contextual callout, not as a card inside another card. `BiomeInventoryCard` is used by every unlocked placement item. `BiomeRewardChoiceCard` owns each reward manifest, including its shortcut badge and container layout. `BiomeIconTextButton` owns compound icon-plus-label button content. The supply timer, reward sheet, toast, modal, and compact speed controls consume shared Theme variations.
 
-Buttons define default, hover, pressed, focus, and disabled states centrally. Reward cards use `RewardChoiceButton`; compact speed controls add a selected variation. Inventory cards add selected and unavailable variants; exhausted inventory uses unavailable styling and muted art. New-unlock animation is intentionally not implemented yet, but should decorate the inventory component rather than fork it.
+Buttons define default, hover, pressed, focus, and disabled states centrally. Reward cards use `RewardChoiceButton` and briefly switch to `RewardChoiceButtonChosen` before the reward sheet exits; no card receives focus when the sheet opens. Compact speed controls add a selected variation. Inventory cards add selected and unavailable variants; exhausted inventory uses unavailable styling and muted art. New-unlock animation is intentionally not implemented yet, but should decorate the inventory component rather than fork it.
+
+### Checkpoint information architecture
+
+The checkpoint shell separates three different kinds of work. `DO THIS` contains event evidence such as fox kills, rabbit births, and other constructive actions. Ordered cycles render as literal indexed steps—for example, `Fox kills a rabbit` followed by `Rabbit is born`—rather than a single abstract rhythm label. `KEEP` contains conditions that can regress, including minimum living populations, separate fed groups, species-specific hunger, rabbits per fox, and recent rabbit-loss limits. `FINISH` names the simultaneous hold directly and places the hold bar with it. One `TRY THIS` nudge gives only the next useful action.
+
+Every rule that can stop checkpoint completion is player-facing. Minimums use `current / min target`, loss guards use `current% / max target%`, and Rabbit/Fox hunger have separate, color-coded `Fed`, `Hungry`, and `Starving` states with exact counts in their tooltips. Population and animal-specific rows retain the rabbit or fox glyph for fast recognition. Difficult checkpoints may expose `Need a hint?` for one short suggestion; F3 is reserved for raw identity, timing, and evaluator diagnostics rather than rules the player must guess.
+
+`GameHUD` renders the structured `goals` returned by `GameSystems.current_objective_progress()` and adds the final hold row. The progression layer remains the source of truth for task labels, targets, completion, and semantic warning state. Evidence includes:
+
+| Evidence contract | Checklist status |
+| --- | --- |
+| `founders_fed` | living founders fed / configured founder target |
+| `rabbit_birth` | natural births / configured birth target |
+| `born_rabbit_fed` | surviving young rabbits fed / configured target |
+| `distinct_foxes_fed` | distinct living foxes fed / configured target |
+| `safe_havens` | current viable havens / configured minimum groups |
+| `separated_birth_zones` | separated birthplaces / configured target |
+| `prey_per_fox` | current rabbits per living fox / configured target |
+| `ordered_cycle` | one indexed row per literal fox-kill or rabbit-birth step |
+| species health | separate Rabbit/Fox `Fed`, `Hungry`, or `Starving` live state |
+| rabbit trend | recent loss percentage / configured maximum percentage |
+
+Critical uses living rabbits / configured recovery population; completion uses completed checkpoints; sandbox uses continuous observation. These are presentation mappings over structured state, not duplicate progression rules or decorative counters.
 
 ## Responsive behavior
 
@@ -111,6 +134,7 @@ The project uses a 1280×800 canvas base, `canvas_items` stretch, and `expand` a
 5. Use numeric styling for quantities and counters, and make the value more prominent than its category.
 6. Put interaction styling in the Theme or reusable component, not in gameplay refresh code.
 7. Test new HUD work at 1280×800, 1440×900, and 1920×1080, including long copy, unavailable items, and selected/focus states.
+8. Keep checkpoints list-first: task on the left, value/status on the right, and recognizable animal art where it improves scanning. Do not restore a single oversized metric or card-in-card instruction surface.
 
 ### Permitted geometry exceptions
 
@@ -125,8 +149,10 @@ These exceptions must not spread into label, badge, card, objective-row, toast-c
 
 ## Validation and deliberate limits
 
-Rendered validation covered 1280×800, 1440×900, and 1920×1080. The first render exposed touching top-panel shadows and truncated inventory names; the status group was given a minimum gap and inventory cards were widened so `Carrot patch` and `Berry bush` remain intact. Hardening captures additionally covered selected and unavailable inventory, reward focus, hover and disabled states, the paused-meadow peek HUD, critical messaging, and deliberately long objective copy. The final hierarchy keeps checkpoint copy at 16–28 px, action copy at 13–18 px, quantities at 24 px, and controls at 14 px.
+Rendered validation covered 1280×800, 1440×900, and 1920×1080. The first render exposed touching top-panel shadows and truncated inventory names; the status group was given a minimum gap and inventory cards were widened so `Carrot patch` and `Berry bush` remain intact. Hardening captures additionally covered selected and unavailable inventory, reward focus, hover and disabled states, the paused-meadow peek HUD, critical messaging, and deliberately long objective copy.
 
-Migration completion removed all 16 numeric production `_make_label` calls, the numeric compatibility helper, all 19 local color overrides, all 10 local StyleBox overrides, and the three `GameHUD._flat_style` references. Production `GameHUD` and components now contain zero font-size, color, or StyleBox override calls and zero StyleBox constructors. All remaining StyleBox, corner, border, and shadow declarations are centralized in `BiomeTheme`. Compound reward, shortcut-badge, peek-button, objective-step, and inventory-selection layout is container-backed. The 17 remaining direct geometry assignments are 14 responsive root-position branches, one dynamic inventory-root width, and two entrance-animation positions, all covered by the exceptions above.
+The checklist checkpoint iteration was rendered with an early checkpoint and a dense predator checkpoint. The 360px shell stays content-sized, right-aligned statuses remain readable, rabbit/fox glyphs provide quick population cues, and the dense state does not overlap the population or inventory controls. Automated progression coverage verifies every structured checkpoint goal maps into a live checklist row.
+
+Migration completion removed all 16 numeric production `_make_label` calls, the numeric compatibility helper, all 19 local color overrides, all 10 local StyleBox overrides, and the three `GameHUD._flat_style` references. Production `GameHUD` and components now contain zero font-size, color, or StyleBox override calls and zero StyleBox constructors. All remaining StyleBox, corner, border, and shadow declarations are centralized in `BiomeTheme`. Compound reward, shortcut-badge, peek-button, checkpoint, and inventory-selection layout is container-backed. The 17 remaining direct geometry assignments are 14 responsive root-position branches, one dynamic inventory-root width, and two entrance-animation positions, all covered by the exceptions above.
 
 Deferred opportunities: bundle and license a distinctive storybook font; add a short newly-unlocked inventory treatment; and add narrow/mobile breakpoints if a sub-1030-wide target enters scope. None changes simulation, terrain, art direction, camera behavior, or gameplay rules.

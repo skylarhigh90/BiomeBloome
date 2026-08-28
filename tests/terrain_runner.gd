@@ -157,7 +157,8 @@ func _test_food_route_uses_a_ford() -> void:
 		if sim.terrain.is_deep_water(sim.rabbits[rabbit_id]["position"]):
 			stayed_dry = false
 			break
-	_expect(routed and stayed_dry and closest_distance < starting_distance * 0.45, "Rabbit food selection makes route progress through a ford and never crosses deep water directly", "%s, %.1f -> %.1f" % [str(rabbit["route_ford"]), starting_distance, closest_distance])
+	var final_rabbit: Dictionary = sim.rabbits[rabbit_id]
+	_expect(routed and stayed_dry and closest_distance < starting_distance * 0.45, "Rabbit food selection makes route progress through a ford and never crosses deep water directly", "%s, %.1f -> %.1f, start %s, %s at %s v%s via %s" % [str(rabbit["route_ford"]), starting_distance, closest_distance, str(setup["start"]), final_rabbit["behavior"], str(final_rabbit["position"]), str(final_rabbit["velocity"]), str(final_rabbit["route_waypoints"])])
 
 func _test_fox_route_uses_a_ford() -> void:
 	var config := Config.make().duplicate(true)
@@ -220,6 +221,8 @@ func _test_safe_havens_require_reachable_food() -> void:
 	sim.expand_world(435.0)
 	var indices := [16, 32]
 	var land_centers: Array[Vector2] = []
+	var land_normals: Array[Vector2] = []
+	var land_tangents: Array[Vector2] = []
 	for index in indices:
 		var stream_point: Vector2 = sim.terrain.stream_points[index]
 		var info: Dictionary = sim.terrain.stream_info(stream_point)
@@ -229,12 +232,18 @@ func _test_safe_havens_require_reachable_food() -> void:
 		var land_center := stream_point + normal * bank_distance
 		var across_center := stream_point - normal * bank_distance
 		land_centers.append(land_center)
+		land_normals.append(normal)
+		land_tangents.append(tangent)
 		sim.add_rabbit(land_center + tangent * 8.0)
 		sim.add_rabbit(land_center - tangent * 8.0)
 		sim.add_plant("berry_bush", across_center)
 	var inaccessible: Dictionary = systems.run_director.spatial_evidence(sim)
-	for center in land_centers:
-		sim.add_plant("berry_bush", center + Vector2(0.0, 18.0))
+	for index in range(land_centers.size()):
+		# Habitat-adjusted capacity can put one poor-site bush below a haven's
+		# minimum biomass. Two nearby bushes keep this a reachability test rather
+		# than accidentally testing habitat productivity as well.
+		sim.add_plant("berry_bush", land_centers[index] + land_normals[index] * 18.0 + land_tangents[index] * 18.0)
+		sim.add_plant("berry_bush", land_centers[index] + land_normals[index] * 18.0 - land_tangents[index] * 18.0)
 	var reachable: Dictionary = systems.run_director.spatial_evidence(sim)
 	_expect(not bool(inaccessible["met"]) and bool(reachable["met"]), "Safe Haven evidence ignores nearby food across deep water and accepts reachable bank-side food", "%s -> %s" % [str(inaccessible), str(reachable)])
 

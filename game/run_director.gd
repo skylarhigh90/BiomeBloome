@@ -31,12 +31,17 @@ var milestone_events: Array = []
 var milestone_fed_rabbit_ids: Dictionary = {}
 var milestone_fed_born_rabbit_ids: Dictionary = {}
 var milestone_fed_fox_ids: Dictionary = {}
+var milestone_born_rabbit_ids: Dictionary = {}
+var milestone_birth_positions: Array[Vector2] = []
 var placed_rabbit_ids: Dictionary = {}
 var born_rabbit_ids: Dictionary = {}
 var sequence_progress := 0
 var sequence_started_at := -1.0
 var sequence_completed := false
 var last_safe_haven_groups: Array = []
+var spatial_evidence_cache: Dictionary = {}
+var spatial_evidence_cache_key := ""
+var spatial_evidence_sampled_at := -INF
 
 var run_state := STATE_PLAYING
 var rabbit_failure_armed := false
@@ -87,13 +92,16 @@ func milestone_position(milestone_id: String) -> int:
 func has_completed(milestone_id: String) -> bool:
 	return milestone_id in completed_milestones
 
-func record_entity_added(kind: String, entity_id: int, reason: String) -> void:
+func record_entity_added(kind: String, entity_id: int, reason: String, position: Vector2 = Vector2.INF) -> void:
 	if kind != "rabbit":
 		return
 	if reason == "birth":
 		born_rabbit_ids[entity_id] = true
 		if run_state == STATE_PLAYING:
 			milestone_rabbit_births += 1
+			milestone_born_rabbit_ids[entity_id] = true
+			if position != Vector2.INF:
+				milestone_birth_positions.append(position)
 			_record_ecology_event("birth", entity_id)
 	else:
 		placed_rabbit_ids[entity_id] = true
@@ -168,11 +176,13 @@ func milestone_progress(simulation: EcosystemSimulation) -> Dictionary:
 	var sequence_remaining := evidence_window
 	if sequence_started_at >= 0.0:
 		sequence_remaining = maxf(0.0, evidence_window - (clock_time - sequence_started_at))
-	var evidence_met := _milestone_evidence_met(milestone, simulation)
+	var criterion_progress := _milestone_criterion_progress(milestone, simulation)
+	var evidence_met := _criteria_are_met(criterion_progress)
 	var trend_met := not _is_severely_declining(milestone, simulation)
 	var populations_met := simulation.population("rabbit") >= int(milestone.get("rabbit_min", 0)) \
 		and simulation.population("fox") >= int(milestone.get("fox_min", 0))
 	var starvation_met := not _has_forbidden_starvation(milestone, simulation)
+	var goals := _milestone_goal_progress(milestone, simulation, criterion_progress, trend_met)
 	return {
 		"milestone_id": str(milestone["id"]),
 		"phase": milestone_phase(simulation),
@@ -181,9 +191,9 @@ func milestone_progress(simulation: EcosystemSimulation) -> Dictionary:
 		"fox_count": simulation.population("fox"),
 		"fox_target": int(milestone.get("fox_min", 0)),
 		"birth_count": milestone_rabbit_births,
-		"birth_target": int(milestone.get("rabbit_births", 0)),
+		"birth_target": _criterion_target(criterion_progress, "rabbit_birth"),
 		"hunt_count": milestone_hunts,
-		"hunt_target": int(milestone.get("hunts", 0)),
+		"hunt_target": _criterion_target(criterion_progress, "hunts"),
 		"fed_founder_count": _living_set_count(milestone_fed_rabbit_ids, simulation.rabbits),
 		"fed_born_count": _living_set_count(milestone_fed_born_rabbit_ids, simulation.rabbits),
 		"fed_fox_count": _living_set_count(milestone_fed_fox_ids, simulation.foxes),
@@ -201,83 +211,132 @@ func milestone_progress(simulation: EcosystemSimulation) -> Dictionary:
 		"sequence_completed": sequence_completed,
 		"sequence_time_remaining": sequence_remaining,
 		"evidence_window": evidence_window,
+		"criteria": criterion_progress,
+		"goals": goals,
 	}
 
-func spatial_evidence(simulation: EcosystemSimulation) -> Dictionary:
-	var haven_cfg: Dictionary = progression.get("safe_havens", {})
+func spatial_evidence(simulation: EcosystemSimulation, requirements: Dictionary = {}) -> Dictionary:
+	var haven_cfg: Dictionary = progression.get("safe_havens", {}).duplicate(true)
+	for key in ["rabbits_per_group", "minimum_separation", "minimum_local_food"]:
+		if requirements.has(key):
+			haven_cfg[key] = requirements[key]
+	var required_groups := int(requirements.get("target", haven_cfg.get("minimum_groups", 2)))
 	var group_size := int(haven_cfg.get("rabbits_per_group", 2))
 	var food_radius := float(config["rabbit"]["food_detection_radius"])
-	# A haven is a shared local refuge, not a momentary mating contact. The
-	# slightly wider neighborhood tolerates normal wandering while remaining
-	# well inside a rabbit's forage range.
+	# A nursery is a bounded local nucleus around a rabbit, not the transitive
+	# connected component of every nearby rabbit. This keeps a wandering rabbit
+	# or a long Rabbit chain from merging and invalidating otherwise healthy
+	# refuges while retaining terrain-aware proximity and forage checks.
 	var group_radius := minf(food_radius * 0.75, float(config["rabbit"]["mating_radius"]) * 1.65)
 	var food_needed := float(haven_cfg.get("minimum_local_food", config["rabbit"]["local_food_needed"]))
-	var unvisited: Dictionary = {}
+	var forage_by_rabbit: Dictionary = {}
 	for rabbit_id in simulation.rabbits:
-		unvisited[rabbit_id] = true
+		var food_ids: Dictionary = {}
+		var rabbit_position: Vector2 = simulation.rabbits[rabbit_id]["position"]
+		for plant_id in simulation.plants:
+			var plant: Dictionary = simulation.plants[plant_id]
+			if simulation.plant_is_food_available(plant) \
+				and rabbit_position.distance_to(plant["position"]) <= food_radius \
+				and simulation.ground_route_distance(rabbit_position, plant["position"], food_radius) <= food_radius:
+				food_ids[plant_id] = true
+		if not food_ids.is_empty():
+			forage_by_rabbit[rabbit_id] = food_ids
 	var viable: Array = []
-	while not unvisited.is_empty():
-		var seed_id: int = unvisited.keys()[0]
-		var queue: Array[int] = [seed_id]
+	for seed_id in forage_by_rabbit:
+		var seed_position: Vector2 = simulation.rabbits[seed_id]["position"]
 		var member_ids: Array[int] = []
-		unvisited.erase(seed_id)
-		while not queue.is_empty():
-			var rabbit_id: int = queue.pop_front()
+		for rabbit_id in forage_by_rabbit:
+			var rabbit_position: Vector2 = simulation.rabbits[rabbit_id]["position"]
+			if seed_position.distance_to(rabbit_position) > group_radius \
+				or simulation.ground_route_distance(seed_position, rabbit_position, group_radius) > group_radius:
+				continue
 			member_ids.append(rabbit_id)
-			var position: Vector2 = simulation.rabbits[rabbit_id]["position"]
-			for other_id in unvisited.keys():
-				var other_position: Vector2 = simulation.rabbits[other_id]["position"]
-				if position.distance_to(other_position) <= group_radius \
-					and simulation.ground_route_distance(position, other_position, group_radius) <= group_radius:
-					unvisited.erase(other_id)
-					queue.append(other_id)
 		if member_ids.size() < group_size:
 			continue
 		var food_ids: Dictionary = {}
-		var every_rabbit_has_food := true
-		var center := Vector2.ZERO
-		for rabbit_id in member_ids:
-			var rabbit_position: Vector2 = simulation.rabbits[rabbit_id]["position"]
-			center += rabbit_position
-			var rabbit_has_food := false
-			for plant_id in simulation.plants:
-				var plant: Dictionary = simulation.plants[plant_id]
-				if float(plant["food"]) > 0.15 \
-					and rabbit_position.distance_to(plant["position"]) <= food_radius \
-					and simulation.ground_route_distance(rabbit_position, plant["position"], food_radius) <= food_radius:
-					rabbit_has_food = true
-					food_ids[plant_id] = true
-			if not rabbit_has_food:
-				every_rabbit_has_food = false
+		for plant_id in forage_by_rabbit[seed_id]:
+			var plant_position: Vector2 = simulation.plants[plant_id]["position"]
+			if seed_position.distance_to(plant_position) <= group_radius \
+				and simulation.ground_route_distance(seed_position, plant_position, group_radius) <= group_radius:
+				food_ids[plant_id] = true
 		var available_food := 0.0
 		for plant_id in food_ids:
 			available_food += float(simulation.plants[plant_id]["food"])
-		if every_rabbit_has_food and available_food >= food_needed:
+		if available_food >= food_needed:
 			viable.append({
 				"members": member_ids,
-				"center": center / float(member_ids.size()),
+				"center": seed_position,
 				"food": available_food,
+				"food_ids": food_ids.duplicate(),
 			})
-	var separation := maxf(
-		float(haven_cfg.get("minimum_separation", 300.0)),
-		float(config["fox"]["prey_detection_radius"]) * 1.2
-	)
-	var separated_groups: Array = []
-	for first_index in range(viable.size()):
-		for second_index in range(first_index + 1, viable.size()):
-			if _minimum_group_distance(viable[first_index], viable[second_index], simulation) >= separation:
-				separated_groups = [viable[first_index], viable[second_index]]
-				break
-		if not separated_groups.is_empty():
-			break
+	var separation := float(haven_cfg.get("minimum_separation", 300.0))
+	var separated_groups := _select_separated_nursery_zones(viable, required_groups, separation, simulation)
 	last_safe_haven_groups = separated_groups
 	return {
-		"met": separated_groups.size() >= int(haven_cfg.get("minimum_groups", 2)),
+		"met": separated_groups.size() >= required_groups,
 		"viable_group_count": viable.size(),
 		"separated_group_count": separated_groups.size(),
 		"groups": separated_groups,
 		"minimum_separation": separation,
+		"required_groups": required_groups,
 	}
+
+func _select_separated_nursery_zones(candidates: Array, required_groups: int, minimum_separation: float, simulation: EcosystemSimulation) -> Array:
+	if candidates.is_empty() or required_groups <= 0:
+		return []
+	var best: Array = []
+	# Several projection orders keep a dense central candidate from masking two
+	# valid outer nurseries. The search remains bounded even at the live Rabbit
+	# cap, and naturally supports targets above two.
+	var directions := [
+		Vector2.RIGHT,
+		Vector2.LEFT,
+		Vector2.DOWN,
+		Vector2.UP,
+		Vector2(1.0, 1.0).normalized(),
+		Vector2(-1.0, 1.0).normalized(),
+		Vector2(1.0, -1.0).normalized(),
+		Vector2(-1.0, -1.0).normalized(),
+	]
+	for direction in directions:
+		var ordered := candidates.duplicate()
+		ordered.sort_custom(func(first: Dictionary, second: Dictionary) -> bool:
+			var first_projection: float = Vector2(first["center"]).dot(direction)
+			var second_projection: float = Vector2(second["center"]).dot(direction)
+			if not is_equal_approx(first_projection, second_projection):
+				return first_projection < second_projection
+			return int(first["members"].size()) > int(second["members"].size())
+		)
+		var selected: Array = []
+		for candidate in ordered:
+			var separated := true
+			for existing in selected:
+				if not _nursery_zones_are_separated(candidate, existing, minimum_separation, simulation):
+					separated = false
+					break
+			if not separated:
+				continue
+			selected.append(candidate)
+			if selected.size() >= required_groups:
+				break
+		if selected.size() > best.size():
+			best = selected
+		if best.size() >= required_groups:
+			break
+	return best
+
+func _nursery_zones_are_separated(first: Dictionary, second: Dictionary, minimum_separation: float, simulation: EcosystemSimulation) -> bool:
+	for first_id in first["members"]:
+		if first_id in second["members"]:
+			return false
+	for first_food_id in first["food_ids"]:
+		if second["food_ids"].has(first_food_id):
+			return false
+	var first_center: Vector2 = first["center"]
+	var second_center: Vector2 = second["center"]
+	if first_center.distance_to(second_center) >= minimum_separation:
+		return true
+	return simulation.ground_route_distance(first_center, second_center, minimum_separation) >= minimum_separation
 
 func continue_observing() -> bool:
 	if run_state != STATE_COMPLETED:
@@ -295,7 +354,11 @@ func debug_lines(simulation: EcosystemSimulation = null) -> Array[String]:
 		lines.append("Evidence births %d · hunts %d · founders fed %d · born fed %d · foxes fed %d" % [milestone_rabbit_births, milestone_hunts, milestone_fed_rabbit_ids.size(), milestone_fed_born_rabbit_ids.size(), milestone_fed_fox_ids.size()])
 		lines.append("Sequence %d/%d · stable %.1fs/%.1fs" % [sequence_progress, milestone.get("event_sequence", []).size(), milestone_stability, float(milestone.get("stabilization", 0.0))])
 		if simulation != null:
-			var evidence := spatial_evidence(simulation) if str(milestone.get("evidence_type", "")) == "safe_havens" else {}
+			var evidence := {}
+			for configured in milestone.get("criteria", []):
+				if str(configured.get("type", "")) == "safe_havens":
+					evidence = spatial_evidence(simulation, configured)
+					break
 			lines.append("Population rabbit %d · fox %d · phase %s" % [simulation.population("rabbit"), simulation.population("fox"), milestone_phase(simulation)])
 			if not evidence.is_empty():
 				lines.append("Havens viable %d · separated %d · separation %.0f" % [evidence["viable_group_count"], evidence["separated_group_count"], evidence["minimum_separation"]])
@@ -321,28 +384,186 @@ func _update_milestone(delta: float, simulation: EcosystemSimulation) -> void:
 		_complete_current_milestone()
 
 func _milestone_evidence_met(milestone: Dictionary, simulation: EcosystemSimulation) -> bool:
-	match str(milestone.get("evidence_type", "")):
+	return _criteria_are_met(_milestone_criterion_progress(milestone, simulation))
+
+func _milestone_criterion_progress(milestone: Dictionary, simulation: EcosystemSimulation) -> Array:
+	var results: Array = []
+	for configured in milestone.get("criteria", []):
+		var criterion: Dictionary = configured
+		results.append(_criterion_progress(criterion, milestone, simulation))
+	return results
+
+func _criterion_progress(criterion: Dictionary, milestone: Dictionary, simulation: EcosystemSimulation) -> Dictionary:
+	var criterion_type := str(criterion.get("type", ""))
+	var target := int(criterion.get("target", 1))
+	var current := 0
+	match criterion_type:
 		"founders_fed":
-			return _living_set_count(milestone_fed_rabbit_ids, simulation.rabbits) >= int(milestone.get("distinct_rabbits_fed", 1))
+			current = _living_set_count(milestone_fed_rabbit_ids, simulation.rabbits)
 		"rabbit_birth":
-			return milestone_rabbit_births >= int(milestone.get("rabbit_births", 1))
+			current = milestone_rabbit_births
 		"born_rabbit_fed":
-			var survival_age := float(milestone.get("born_survival_age", 0.0))
+			var eligible_ids: Dictionary = milestone_born_rabbit_ids if bool(criterion.get("fresh_only", false)) else born_rabbit_ids
+			var minimum_age := float(criterion.get("minimum_age", milestone.get("born_survival_age", 0.0)))
 			for rabbit_id in milestone_fed_born_rabbit_ids:
-				if simulation.rabbits.has(rabbit_id) and float(simulation.rabbits[rabbit_id]["age"]) >= survival_age:
-					return true
-			return false
-		"living_fox_fed":
-			return milestone_hunts >= int(milestone.get("hunts", 1)) \
-				and _living_set_count(milestone_fed_fox_ids, simulation.foxes) >= 1
+				if eligible_ids.has(rabbit_id) and simulation.rabbits.has(rabbit_id) \
+					and float(simulation.rabbits[rabbit_id]["age"]) >= minimum_age:
+					current += 1
+		"hunts":
+			current = milestone_hunts
+		"distinct_foxes_fed":
+			current = _living_set_count(milestone_fed_fox_ids, simulation.foxes)
 		"safe_havens":
-			return bool(spatial_evidence(simulation)["met"])
-		"two_foxes_fed_and_birth":
-			return milestone_rabbit_births >= int(milestone.get("rabbit_births", 1)) \
-				and _living_set_count(milestone_fed_fox_ids, simulation.foxes) >= int(milestone.get("distinct_foxes_fed", 2))
+			var evidence := _cached_spatial_evidence(simulation, criterion)
+			current = int(evidence["separated_group_count"])
+		"separated_birth_zones":
+			current = _separated_birth_zone_count(float(criterion.get("minimum_separation", 220.0)))
 		"ordered_cycle":
-			return sequence_completed
+			target = milestone.get("event_sequence", []).size()
+			current = target if sequence_completed else sequence_progress
+		"prey_per_fox":
+			var fox_count := simulation.population("fox")
+			current = simulation.population("rabbit") if fox_count <= 0 else floori(float(simulation.population("rabbit")) / float(fox_count))
+		_:
+			target = 1
+			current = 1
+	var result := {
+		"id": str(criterion.get("id", criterion_type)),
+		"type": criterion_type,
+		"label": str(criterion.get("label", "Ecological evidence")),
+		"metric_label": str(criterion.get("metric_label", "ECOLOGICAL PROOF")),
+		"kind": str(criterion.get("kind", _criterion_kind(criterion_type))),
+		"current": current,
+		"target": target,
+		"met": current >= target,
+	}
+	for detail in ["rabbits_per_group", "minimum_local_food", "minimum_separation"]:
+		if criterion.has(detail):
+			result[detail] = criterion[detail]
+	return result
+
+func _milestone_goal_progress(milestone: Dictionary, simulation: EcosystemSimulation, criterion_progress: Array, trend_met: bool) -> Array:
+	var goals: Array = []
+	var rabbit_target := int(milestone.get("rabbit_min", 0))
+	if rabbit_target > 0:
+		goals.append(_goal_result("rabbit_population", "rabbit_population", "Rabbits alive", "RABBITS ALIVE", "rabbit", simulation.population("rabbit"), rabbit_target))
+	var fox_target := int(milestone.get("fox_min", 0))
+	if fox_target > 0:
+		goals.append(_goal_result("fox_population", "fox_population", "Foxes alive", "FOXES ALIVE", "fox", simulation.population("fox"), fox_target))
+	for result in criterion_progress:
+		goals.append(result)
+	if bool(milestone.get("forbid_active_starvation", false)):
+		goals.append(_health_goal_result("rabbit_health", "rabbit", simulation.hunger_summary("rabbit")))
+	if bool(milestone.get("forbid_fox_starvation", false)):
+		goals.append(_health_goal_result("fox_health", "fox", simulation.hunger_summary("fox")))
+	if float(milestone.get("decline_window", 0.0)) > 0.0:
+		goals.append(_trend_goal_result(milestone, simulation, trend_met))
+	return goals
+
+func _health_goal_result(id: String, kind: String, summary: Dictionary) -> Dictionary:
+	var population := int(summary.get("population", 0))
+	var starving_count := int(summary.get("starving_count", 0))
+	var warning_count := int(summary.get("warning_count", 0))
+	var blocked_at := maxi(1, ceili(float(population) * 0.20)) if population > 0 else 1
+	var maximum_allowed := blocked_at - 1
+	var met := starving_count <= maximum_allowed
+	var status := "absent" if population <= 0 else ("starving" if not met else ("hungry" if warning_count > 0 else "fed"))
+	var display_name := "Rabbits" if kind == "rabbit" else "Foxes"
+	return {
+		"id": id,
+		"type": "health",
+		"label": "%s hunger" % display_name.trim_suffix("s"),
+		"metric_label": "%s HUNGER" % display_name.to_upper(),
+		"kind": kind,
+		"current": starving_count,
+		"target": maximum_allowed,
+		"met": met,
+		"status": status,
+		"warning_count": warning_count,
+		"population": population,
+		"tooltip": "%d of %d %s starving. This checkpoint pauses above %d." % [starving_count, population, display_name.to_lower(), maximum_allowed],
+		"unmet_state": "danger",
+	}
+
+func _trend_goal_result(milestone: Dictionary, simulation: EcosystemSimulation, trend_met: bool) -> Dictionary:
+	var window := float(milestone.get("decline_window", 0.0))
+	var current_population := simulation.population("rabbit")
+	var peak := current_population
+	for sample in trend_history:
+		if clock_time - float(sample["time"]) <= window:
+			peak = maxi(peak, int(sample["rabbits"]))
+	var loss_percent := 0
+	if peak > 0:
+		loss_percent = roundi(float(peak - current_population) / float(peak) * 100.0)
+	var maximum_percent := roundi(float(milestone.get("severe_decline_fraction", 1.0)) * 100.0)
+	return {
+		"id": "rabbit_trend",
+		"type": "trend",
+		"label": "Rabbit loss (%ds)" % roundi(window),
+		"metric_label": "RECENT RABBIT LOSS",
+		"kind": "rabbit",
+		"current": loss_percent,
+		"target": maximum_percent,
+		"met": trend_met,
+		"tooltip": "%d rabbits now; recent peak %d. The checkpoint pauses if losses exceed %d%%." % [current_population, peak, maximum_percent],
+		"unmet_state": "danger",
+	}
+
+func _goal_result(id: String, type: String, label: String, metric_label: String, kind: String, current: int, target: int, unmet_state: String = "warning") -> Dictionary:
+	return {
+		"id": id,
+		"type": type,
+		"label": label,
+		"metric_label": metric_label,
+		"kind": kind,
+		"current": current,
+		"target": target,
+		"met": current >= target,
+		"unmet_state": unmet_state,
+	}
+
+func _criteria_are_met(results: Array) -> bool:
+	for result in results:
+		if not bool(result.get("met", false)):
+			return false
 	return true
+
+func _criterion_target(results: Array, criterion_type: String) -> int:
+	for result in results:
+		if str(result.get("type", "")) == criterion_type:
+			return int(result.get("target", 0))
+	return 0
+
+func _criterion_kind(criterion_type: String) -> String:
+	if criterion_type in ["founders_fed", "rabbit_birth", "born_rabbit_fed", "safe_havens", "separated_birth_zones", "prey_per_fox"]:
+		return "rabbit"
+	if criterion_type in ["hunts", "distinct_foxes_fed"]:
+		return "fox"
+	return "leaf"
+
+func _separated_birth_zone_count(minimum_separation: float) -> int:
+	var representatives: Array[Vector2] = []
+	for position in milestone_birth_positions:
+		var separated := true
+		for existing in representatives:
+			if position.distance_to(existing) < minimum_separation:
+				separated = false
+				break
+		if separated:
+			representatives.append(position)
+	return representatives.size()
+
+func _cached_spatial_evidence(simulation: EcosystemSimulation, requirements: Dictionary) -> Dictionary:
+	var cache_key := str(requirements)
+	var interval := float(progression.get("spatial_sample_interval", 0.5))
+	if interval > 0.0 and cache_key == spatial_evidence_cache_key \
+		and not spatial_evidence_cache.is_empty() and clock_time - spatial_evidence_sampled_at < interval:
+		last_safe_haven_groups = spatial_evidence_cache.get("groups", [])
+		return spatial_evidence_cache
+	spatial_evidence_cache = spatial_evidence(simulation, requirements)
+	spatial_evidence_cache_key = cache_key
+	spatial_evidence_sampled_at = clock_time
+	return spatial_evidence_cache
 
 func _has_forbidden_starvation(milestone: Dictionary, simulation: EcosystemSimulation) -> bool:
 	if bool(milestone.get("forbid_active_starvation", false)) and _has_severe_starvation(simulation.hunger_summary("rabbit")):
@@ -391,6 +612,11 @@ func _reset_milestone_evidence() -> void:
 	milestone_fed_rabbit_ids.clear()
 	milestone_fed_born_rabbit_ids.clear()
 	milestone_fed_fox_ids.clear()
+	milestone_born_rabbit_ids.clear()
+	milestone_birth_positions.clear()
+	spatial_evidence_cache.clear()
+	spatial_evidence_cache_key = ""
+	spatial_evidence_sampled_at = -INF
 	sequence_progress = 0
 	sequence_started_at = -1.0
 	sequence_completed = false
@@ -399,7 +625,7 @@ func _reset_milestone_evidence() -> void:
 func _record_ecology_event(event_type: String, entity_id: int) -> void:
 	milestone_events.append({"type": event_type, "entity_id": entity_id, "time": clock_time})
 	var milestone := current_milestone()
-	if not milestone.is_empty() and str(milestone.get("evidence_type", "")) == "ordered_cycle":
+	if not milestone.is_empty() and not milestone.get("event_sequence", []).is_empty():
 		_advance_sequence(event_type, milestone)
 
 func _advance_sequence(event_type: String, milestone: Dictionary) -> void:
@@ -525,15 +751,6 @@ func _living_set_count(ids: Dictionary, living: Dictionary) -> int:
 		if living.has(entity_id):
 			count += 1
 	return count
-
-func _minimum_group_distance(first: Dictionary, second: Dictionary, simulation: EcosystemSimulation) -> float:
-	var minimum := INF
-	for first_id in first["members"]:
-		for second_id in second["members"]:
-			var first_position: Vector2 = simulation.rabbits[first_id]["position"]
-			var second_position: Vector2 = simulation.rabbits[second_id]["position"]
-			minimum = minf(minimum, simulation.ground_route_distance(first_position, second_position))
-	return minimum
 
 func _trim_recent_deaths() -> void:
 	var window := float(progression["critical"].get("recent_event_window", 90.0))

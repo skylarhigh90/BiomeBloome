@@ -239,7 +239,11 @@ func _update_debug_panel() -> void:
 		else:
 			lines.append("%s #%d · %s" % [debug_selected_kind.capitalize(), data["id"], data["behavior"]])
 			lines.append("Hunger %.1f · Age %.1f · Cooldown %.1f" % [data["hunger"], data["age"], data["reproduction_cooldown"]])
-			lines.append("Target %s · Nearby %s" % [str(data["target_id"]), str(data["nearby"])])
+			if debug_selected_kind == "rabbit":
+				lines.append("Target %s · Local food %d · Shared food %d" % [str(data["target_id"]), int(data["nearby"]["food"]), int(data["nearby"]["shared_food"])])
+				lines.append("Social group %d · Nearby foxes %d" % [int(data["nearby"]["social_group"]), int(data["nearby"]["predators"])])
+			else:
+				lines.append("Target %s · Nearby prey %d" % [str(data["target_id"]), int(data["nearby"]["prey"])])
 			var terrain_data: Dictionary = data["terrain"]
 			lines.append("Terrain M %.2f · W %.2f · T %.2f · Water %.2f" % [terrain_data["meadow"], terrain_data["woodland"], terrain_data["thicket"], terrain_data["water"]])
 			lines.append("Route %.1f direct %.1f · waypoints %d · ford %s" % [data["route_distance"], data["route_direct_distance"], data["route_waypoints"].size(), str(data["route_ford"])])

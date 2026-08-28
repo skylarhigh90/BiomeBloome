@@ -12,7 +12,7 @@ const RewardBurst = preload("res://ui/reward_burst.gd")
 const ThemeSystem = preload("res://ui/theme/biome_theme.gd")
 const HUDStat = preload("res://ui/components/hud_stat.gd")
 const HUDStatus = preload("res://ui/components/hud_status.gd")
-const InstructionCallout = preload("res://ui/components/instruction_callout.gd")
+const CheckpointProgress = preload("res://ui/components/checkpoint_progress.gd")
 const InventoryCard = preload("res://ui/components/inventory_card.gd")
 const RewardChoiceCard = preload("res://ui/components/reward_choice_card.gd")
 const IconTextButton = preload("res://ui/components/icon_text_button.gd")
@@ -41,34 +41,9 @@ var objective_panel: PanelContainer
 var objective_eyebrow: Label
 var objective_title: Label
 var objective_body: Label
-var objective_teaser: Label
-var objective_requirements_heading: Label
-var objective_goal_rows: Dictionary = {}
-var objective_goal_values: Dictionary = {}
-var objective_goal_checks: Dictionary = {}
-var objective_evidence_row: HBoxContainer
-var objective_evidence_check: Label
-var objective_evidence_title: Label
-var objective_evidence_value: Label
-var objective_evidence: Label
-var objective_steps_box: VBoxContainer
-var objective_steps: Array = []
-var objective_trend_row: HBoxContainer
-var objective_trend_check: Label
-var objective_trend_value: Label
-var objective_progress_row: VBoxContainer
-var objective_progress: ProgressBar
-var objective_progress_label: Label
-var objective_progress_value: Label
-var objective_progress_hint: Label
-var objective_progress_target := 0.0
-var objective_coach_panel: PanelContainer
-var objective_callout
-var objective_coach_detail: Label
-var objective_coach_glyph: Control
+var objective_progress_view
 var objective_layout_mode := ""
-var last_objective_id := ""
-var last_sequence_progress := 0
+var displayed_objective_id := ""
 
 var population_panel: PanelContainer
 var population_labels: Dictionary = {}
@@ -102,7 +77,6 @@ var supply_burst: Control
 var supply_sheet: PanelContainer
 var supply_title: Label
 var supply_subtitle: Label
-var supply_resume_hint: Label
 var supply_peek_button: Button
 var supply_peek_hud: PanelContainer
 var supply_return_button: Button
@@ -112,7 +86,7 @@ var supply_card_roles: Array = []
 var supply_card_contents: Array = []
 var supply_peeking := false
 var supply_claiming := false
-var supply_focus_index := 0
+var supply_focus_index := -1
 
 var toast_panel: PanelContainer
 var toast_label: Label
@@ -166,7 +140,7 @@ func _build_interface() -> void:
 	root.resized.connect(_layout_interface)
 
 func _build_objective_card() -> void:
-	objective_panel = _make_panel(Vector2(410.0, 0.0), "SurfaceStandard")
+	objective_panel = _make_panel(Vector2(360.0, 0.0), "SurfaceStandard")
 	root.add_child(objective_panel)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", ThemeSystem.SPACE.small)
@@ -174,158 +148,15 @@ func _build_objective_card() -> void:
 
 	objective_eyebrow = _make_label("MILESTONE 01", "eyebrow")
 	box.add_child(objective_eyebrow)
-	objective_title = _make_label("Grow a self-sustaining rabbit colony", "h1")
+	objective_title = _make_label("Grow a self-sustaining rabbit colony", "h3")
 	objective_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(objective_title)
-	objective_body = _make_label("Raise a new generation and keep the colony stable.", "body")
+	objective_body = _make_label("Raise a new generation and keep the colony stable.", "label_secondary")
 	objective_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(objective_body)
-
-	objective_evidence_row = HBoxContainer.new()
-	objective_evidence_row.custom_minimum_size.y = 20.0
-	box.add_child(objective_evidence_row)
-	objective_evidence_title = _make_label("PROVE THE COLONY", "eyebrow")
-	objective_evidence_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	objective_evidence_row.add_child(objective_evidence_title)
-	objective_evidence_value = _make_label("0 / 1", "caption")
-	objective_evidence_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	objective_evidence_row.add_child(objective_evidence_value)
-	objective_evidence_check = _make_requirement_check()
-	objective_evidence_check.visible = false
-
-	objective_steps_box = VBoxContainer.new()
-	objective_steps_box.add_theme_constant_override("separation", ThemeSystem.SPACE.tiny)
-	box.add_child(objective_steps_box)
-	for index in range(4):
-		objective_steps.append(_make_objective_step(index))
-
-	objective_evidence = _make_label("Only a natural birth counts — placing a rabbit does not.", "caption")
-	objective_evidence.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(objective_evidence)
-
-	objective_requirements_heading = _make_label("KEEP HEALTHY", "eyebrow")
-	box.add_child(objective_requirements_heading)
-
-	for kind in ["rabbit", "fox"]:
-		var row := HBoxContainer.new()
-		row.custom_minimum_size = Vector2(0.0, 23.0)
-		row.add_theme_constant_override("separation", ThemeSystem.SPACE.small)
-		box.add_child(row)
-		var check := _make_requirement_check()
-		row.add_child(check)
-		var glyph: Control = Glyph.new().configure(kind, Color.TRANSPARENT, false)
-		glyph.custom_minimum_size = Vector2(23.0, 23.0)
-		row.add_child(glyph)
-		var population_label := "Rabbits alive" if kind == "rabbit" else "Foxes alive"
-		var name_label := _make_label(population_label, "label_strong")
-		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		row.add_child(name_label)
-		var value := _make_label("0 / 0", "label_strong")
-		value.custom_minimum_size.x = 62.0
-		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		value.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		row.add_child(value)
-		objective_goal_rows[kind] = row
-		objective_goal_values[kind] = value
-		objective_goal_checks[kind] = check
-
-	objective_trend_row = _make_requirement_row(box, "Rabbit population")
-	objective_trend_check = objective_trend_row.get_meta("check")
-	objective_trend_value = objective_trend_row.get_meta("value")
-
-	objective_progress_row = VBoxContainer.new()
-	objective_progress_row.add_theme_constant_override("separation", ThemeSystem.SPACE.tiny)
-	box.add_child(objective_progress_row)
-	var progress_heading := HBoxContainer.new()
-	objective_progress_row.add_child(progress_heading)
-	objective_progress_label = _make_label("THEN HOLD THE COLONY", "eyebrow")
-	objective_progress_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	progress_heading.add_child(objective_progress_label)
-	objective_progress_value = _make_label("0 / 0 sec", "label_strong")
-	objective_progress_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	progress_heading.add_child(objective_progress_value)
-	objective_progress = ProgressBar.new()
-	objective_progress.custom_minimum_size = Vector2(0.0, 10.0)
-	objective_progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	objective_progress.show_percentage = false
-	objective_progress.theme_type_variation = "ProgressAccent"
-	objective_progress_row.add_child(objective_progress)
-	objective_progress_hint = _make_label("Starts when the birth and every health goal are complete.", "caption")
-	objective_progress_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	objective_progress_row.add_child(objective_progress_hint)
-
-	objective_callout = InstructionCallout.new().configure(
-		"DO THIS NOW",
-		"Build the colony to 8 rabbits.",
-		"Place rabbits near plentiful carrots or berries.",
-		"rabbit"
-	)
-	objective_coach_panel = objective_callout
-	objective_teaser = objective_callout.title_label
-	objective_coach_detail = objective_callout.detail_label
-	objective_coach_glyph = objective_callout.glyph
-	box.add_child(objective_callout)
-
-func _make_objective_step(index: int) -> Dictionary:
-	var panel := PanelContainer.new()
-	panel.theme_type_variation = "ObjectiveStepFuture"
-	objective_steps_box.add_child(panel)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", ThemeSystem.SPACE.small)
-	panel.add_child(row)
-	var marker := _make_label(str(index + 1), "label_secondary")
-	marker.custom_minimum_size = Vector2(19.0, 23.0)
-	marker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	marker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(marker)
-	var glyph: Control = Glyph.new().configure("rabbit", Color.TRANSPARENT, false)
-	glyph.custom_minimum_size = Vector2(24.0, 24.0)
-	row.add_child(glyph)
-	var copy := VBoxContainer.new()
-	copy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	copy.add_theme_constant_override("separation", ThemeSystem.SPACE.tiny)
-	row.add_child(copy)
-	var title := _make_label("A baby rabbit is born", "label_strong")
-	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	copy.add_child(title)
-	var helper := _make_label("Keep two well-fed adult rabbits near forage.", "caption")
-	helper.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	copy.add_child(helper)
-	var state := _make_label("NEXT", "eyebrow_accent")
-	state.custom_minimum_size.x = 34.0
-	state.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	state.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(state)
-	return {"panel": panel, "marker": marker, "glyph": glyph, "title": title, "helper": helper, "state": state}
-
-func _make_requirement_check() -> Label:
-	var check := _make_label("○", "label_secondary")
-	check.custom_minimum_size.x = 17.0
-	check.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	check.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	return check
-
-func _make_requirement_row(parent: VBoxContainer, title_text: String) -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.custom_minimum_size = Vector2(0.0, 23.0)
-	row.add_theme_constant_override("separation", ThemeSystem.SPACE.small)
-	parent.add_child(row)
-	var check := _make_requirement_check()
-	row.add_child(check)
-	var title := _make_label(title_text, "label_strong")
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(title)
-	var value := _make_label("0 / 0", "label_strong")
-	value.custom_minimum_size.x = 72.0
-	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	value.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(value)
-	row.set_meta("check", check)
-	row.set_meta("title", title)
-	row.set_meta("value", value)
-	return row
+	objective_progress_view = CheckpointProgress.new().configure()
+	objective_progress_view.details_toggled.connect(_on_objective_details_toggled)
+	box.add_child(objective_progress_view)
 
 func _build_population_pulse() -> void:
 	population_panel = _make_panel(POPULATION_PANEL_SIZE, "SurfaceHUDLight")
@@ -457,11 +288,11 @@ func _build_supply_overlay() -> void:
 	heading_copy.add_child(eyebrow)
 	supply_title = _make_label("Meadow Mail!", "display")
 	heading_copy.add_child(supply_title)
-	supply_subtitle = _make_label("Choose one bundle for your satchel. Take all the time you need.", "body")
+	supply_subtitle = _make_label("Choose one bundle for your satchel.", "body")
 	heading_copy.add_child(supply_subtitle)
-	supply_peek_button = _make_peek_button("Peek at meadow", Vector2(184.0, 48.0), false)
+	supply_peek_button = _make_peek_button("Peek", Vector2(132.0, 48.0), false)
 	supply_peek_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	supply_peek_button.tooltip_text = "Hide these choices and inspect your paused meadow. Nothing will move."
+	supply_peek_button.tooltip_text = "Peek"
 	supply_peek_button.pressed.connect(_on_supply_peek_pressed)
 	heading.add_child(supply_peek_button)
 
@@ -485,15 +316,6 @@ func _build_supply_overlay() -> void:
 		supply_card_titles.append(button.title_label)
 		supply_card_contents.append(button.contents)
 
-	var footer := HBoxContainer.new()
-	footer.custom_minimum_size.y = 28.0
-	box.add_child(footer)
-	var controls_hint := _make_label("← / → move   •   Enter choose   •   E peek", "caption")
-	controls_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(controls_hint)
-	supply_resume_hint = _make_label("Nothing moves while you decide", "eyebrow")
-	footer.add_child(supply_resume_hint)
-
 	supply_peek_hud = PanelContainer.new()
 	supply_peek_hud.custom_minimum_size = Vector2(430.0, 70.0)
 	supply_peek_hud.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -516,7 +338,7 @@ func _build_supply_overlay() -> void:
 	peek_copy.add_child(peek_eyebrow)
 	var peek_label := _make_label("Inspect your ecosystem", "text_on_dark")
 	peek_copy.add_child(peek_label)
-	supply_return_button = _make_button("Back to rewards   E", Vector2(142.0, 44.0), "quiet")
+	supply_return_button = _make_button("Back to choices", Vector2(142.0, 44.0), "quiet")
 	supply_return_button.tooltip_text = "Return to your supply choices"
 	supply_return_button.pressed.connect(_on_supply_peek_pressed)
 	peek_row.add_child(supply_return_button)
@@ -652,10 +474,10 @@ func _layout_interface() -> void:
 		return
 	var viewport_size := root.size
 	var compact := viewport_size.x < 1030.0
-	objective_panel.custom_minimum_size = Vector2(410.0, 0.0)
-	objective_panel.reset_size()
+	objective_panel.custom_minimum_size = Vector2(360.0, 0.0)
 	objective_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	objective_panel.position = Vector2(20.0, 20.0)
+	objective_panel.size = objective_panel.get_combined_minimum_size()
 	population_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	var population_x := maxf(
 		(viewport_size.x - POPULATION_PANEL_SIZE.x) * 0.5,
@@ -727,7 +549,7 @@ func _refresh_rabbit_hunger() -> void:
 		var unserved_count := int(summary["unserved_count"])
 		rabbit_hunger_label.text = "%d need nearby food" % unserved_count
 		rabbit_hunger_label.theme_type_variation = "LabelWarning"
-		rabbit_hunger_label.tooltip_text = "These rabbits cannot find usable forage nearby. Place carrot patches or berry bushes near their warning rings."
+		rabbit_hunger_label.tooltip_text = "These rabbits have not found usable reachable forage. Add carrot patches or berry bushes to the revealed meadow."
 	elif state == "foraging":
 		var warning_count := int(summary["warning_count"])
 		rabbit_hunger_label.text = "%d finding food" % warning_count
@@ -786,215 +608,311 @@ func _refresh_speeds() -> void:
 func _refresh_objective() -> void:
 	var state: String = systems.run_director.run_state
 	if state == RunDirector.STATE_SANDBOX:
+		if displayed_objective_id != "sandbox":
+			displayed_objective_id = "sandbox"
+			objective_progress_view.set_details_open(false)
+		displayed_objective_id = "sandbox"
 		objective_eyebrow.text = "FIELD NOTES COMPLETE"
 		objective_title.text = "A living ecosystem"
 		objective_body.text = "The habitat continues at its own rhythm."
-		_hide_objective_mechanics()
-		_set_objective_coach("Keep observing the food web.", "Place, watch, and learn from the ecosystem at its own rhythm.", "leaf")
+		objective_progress_view.set_goals([{
+			"id": "observation",
+			"label": "Observe the living ecosystem",
+			"value": "Ongoing",
+			"kind": "leaf",
+			"state": "success",
+		}])
+		objective_progress_view.set_hint("")
+		objective_progress_view.set_hold_progress(1.0, "success", false)
+		objective_progress_view.set_next("Follow the patterns that interest you.", "Place, watch, and learn from the ecosystem without another checkpoint to complete.")
+		objective_progress_view.set_guidance("")
 		_update_objective_layout("sandbox")
 		return
 	var objective := systems.current_objective()
 	if objective.is_empty():
 		return
 	var progress := systems.current_objective_progress()
+	var objective_id := str(objective["id"])
+	if displayed_objective_id != objective_id:
+		displayed_objective_id = objective_id
+		objective_progress_view.set_details_open(false)
 	objective_eyebrow.text = "CHECKPOINT %d OF %d" % [systems.run_director.milestone_index + 1, systems.run_director.milestones.size()]
 	objective_title.text = objective["title"]
 	objective_body.text = str(objective.get("summary", "Build an ecosystem that can hold together."))
-	_hide_objective_mechanics()
-	var coach := _qualitative_objective_coach(str(objective["id"]), str(progress["phase"]), state)
-	_set_objective_coach(str(coach["title"]), str(coach["detail"]), str(coach["kind"]))
-	objective_coach_detail.text += "\nNEXT · %s" % str(objective.get("teaser", "Keep watching the web."))
-	_update_objective_layout("qualitative:%s:%s" % [str(objective["id"]), str(progress["phase"])])
+	var phase := str(progress["phase"])
+	var coach := _qualitative_objective_coach(objective_id, phase, state)
+	if state != RunDirector.STATE_CRITICAL:
+		coach = _checkpoint_action(coach, progress)
+	if state == RunDirector.STATE_CRITICAL:
+		objective_body.text = "Restore a living breeding group before time runs out."
+		var recovery_target := int(systems.run_director.progression["critical"]["recovery_population"])
+		var rabbit_count := int(progress["rabbit_count"])
+		objective_progress_view.set_goals([
+			_goal_row("population_rabbit", "Rabbits", rabbit_count, recovery_target, "rabbit", rabbit_count >= recovery_target, "danger"),
+			{
+				"id": "recovery",
+				"label": "Bring the colony back",
+				"value": "At risk",
+				"kind": "",
+				"state": "danger",
+			},
+		])
+		objective_progress_view.set_hint("")
+		objective_progress_view.set_hold_progress(0.0, "danger", false)
+		objective_progress_view.set_guidance(
+			"Bring food to the remaining rabbits and give them time to recover.",
+			"Return to the current checkpoint once the lineage recovers."
+		)
+	else:
+		objective_progress_view.set_goals(_checkpoint_goals(objective, progress))
+		objective_progress_view.set_hint("")
+		var hold_target := maxf(0.001, float(progress["stability_target"]))
+		var hold_ratio := clampf(float(progress["stability_elapsed"]) / hold_target, 0.0, 1.0)
+		var hold_state := "success" if hold_ratio >= 1.0 else ("warning" if bool(progress["hold_active"]) else _checkpoint_semantic_state(state, phase))
+		objective_progress_view.set_hold_progress(hold_ratio, hold_state, true)
+		objective_progress_view.set_guidance(
+			_checkpoint_guidance(objective, progress),
+			str(objective.get("teaser", "Keep watching the web."))
+		)
+	objective_progress_view.set_next(str(coach["title"]), str(coach["detail"]))
+	_update_objective_layout("goals:%s:%s" % [objective_id, phase])
 
-func _qualitative_objective_coach(objective_id: String, phase: String, run_state: String) -> Dictionary:
-	if run_state == RunDirector.STATE_CRITICAL:
-		return {"title": "The rabbit lineage needs care.", "detail": "Restore a healthy breeding group and keep food within reach.", "kind": "rabbit"}
+func _checkpoint_goals(_objective: Dictionary, progress: Dictionary) -> Array[Dictionary]:
+	var action_rows: Array[Dictionary] = []
+	var keep_rows: Array[Dictionary] = []
+	for configured_goal in progress.get("goals", []):
+		var goal: Dictionary = configured_goal
+		var goal_type := str(goal.get("type", ""))
+		var met := bool(goal.get("met", false))
+		if goal_type == "ordered_cycle":
+			action_rows.append_array(_ordered_cycle_rows(goal, progress))
+			continue
+		var title := _player_goal_label(goal)
+		var value := "%d / %d" % [int(goal.get("current", 0)), int(goal.get("target", 1))]
+		var state := "success" if met else str(goal.get("unmet_state", "warning"))
+		var marker_style := "check"
+		if goal_type in ["rabbit_population", "fox_population", "prey_per_fox"]:
+			value = "%d / min %d" % [int(goal.get("current", 0)), int(goal.get("target", 1))]
+		elif goal_type == "health":
+			var health_status := str(goal.get("status", "fed"))
+			value = {
+				"fed": "Fed",
+				"hungry": "Hungry",
+				"starving": "Starving",
+				"absent": "—",
+			}.get(health_status, "—")
+			state = {
+				"fed": "success",
+				"hungry": "warning",
+				"starving": "danger",
+				"absent": "normal",
+			}.get(health_status, "normal")
+			marker_style = "status"
+		elif goal_type == "trend":
+			value = "%d%% / max %d%%" % [int(goal.get("current", 0)), int(goal.get("target", 0))]
+		var kind := str(goal.get("kind", ""))
+		var row := {
+			"id": str(goal.get("id", goal_type)),
+			"label": title,
+			"value": value,
+			"kind": kind,
+			"state": state,
+			"complete": met,
+			"marker_style": marker_style,
+			"tooltip": str(goal.get("tooltip", "")),
+			"section": "keep" if goal_type in ["rabbit_population", "fox_population", "health", "trend", "safe_havens", "prey_per_fox"] else "do_this",
+		}
+		if str(row["section"]) == "keep":
+			keep_rows.append(row)
+		else:
+			action_rows.append(row)
+
+	var hold_elapsed := float(progress["stability_elapsed"])
+	var hold_target := float(progress["stability_target"])
+	var finish_rows: Array[Dictionary] = [{
+		"id": "hold",
+		"label": "Hold all goals",
+		"value": "%s / %s" % [_format_short_time(hold_elapsed), _format_short_time(hold_target)],
+		"kind": "",
+		"state": "success" if hold_elapsed + 0.0001 >= hold_target else ("warning" if bool(progress["hold_active"]) else "normal"),
+		"section": "finish",
+	}]
+	return action_rows + keep_rows + finish_rows
+
+func _ordered_cycle_rows(goal: Dictionary, progress: Dictionary) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	var sequence: Array = progress.get("sequence", [])
+	var sequence_progress := int(progress.get("sequence_progress", 0))
+	var sequence_completed := bool(progress.get("sequence_completed", false))
+	for index in range(sequence.size()):
+		var completed := sequence_completed or index < sequence_progress
+		var is_next := not sequence_completed and index == sequence_progress
+		var event_type := str(sequence[index])
+		rows.append({
+			"id": "%s_step_%d" % [str(goal.get("id", "cycle")), index],
+			"label": "Rabbit is born" if event_type == "birth" else "Fox kills a rabbit",
+			"value": "Done" if completed else ("Next" if is_next else "Waiting"),
+			"kind": "rabbit" if event_type == "birth" else "fox",
+			"state": "success" if completed else ("warning" if is_next else "normal"),
+			"complete": completed,
+			"marker_text": "✓" if completed else str(index + 1),
+			"section": "do_this",
+		})
+	return rows
+
+func _goal_row(row_id: String, label_text: String, current: int, target: int, kind: String, complete: bool, incomplete_state: String = "normal") -> Dictionary:
+	return {
+		"id": row_id,
+		"label": label_text,
+		"value": "%d / %d" % [current, target],
+		"kind": kind,
+		"state": "success" if complete else incomplete_state,
+	}
+
+func _player_goal_label(goal: Dictionary) -> String:
+	var goal_type := str(goal.get("type", ""))
+	match goal_type:
+		"founders_fed":
+			return "Rabbits that ate"
+		"rabbit_birth":
+			return "Rabbit births"
+		"born_rabbit_fed":
+			return "Young fed + grown"
+		"safe_havens":
+			return "Separate fed groups"
+		"separated_birth_zones":
+			return "Separate birth areas"
+		"distinct_foxes_fed":
+			return "Foxes with a kill"
+		"prey_per_fox":
+			return "Rabbits per fox"
+		"health":
+			return "Rabbit hunger" if str(goal.get("kind", "")) == "rabbit" else "Fox hunger"
+		"trend":
+			return str(goal.get("label", "Recent rabbit loss"))
+		"rabbit_population":
+			return "Rabbits alive"
+		"fox_population":
+			return "Foxes alive"
+	return str(goal.get("label", "The meadow keeps going"))
+
+func _checkpoint_guidance(objective: Dictionary, progress: Dictionary) -> String:
+	var phase := str(progress.get("phase", ""))
 	if phase == "starving":
-		return {"title": "Food is out of reach.", "detail": "Add forage near the animals under pressure and let them recover.", "kind": "carrot_patch"}
+		return "Bring food closer to the animals under pressure, then give them a moment to recover."
 	if phase == "declining":
-		return {"title": "The web is losing ground.", "detail": "Ease predator pressure and reinforce the rabbit refuges.", "kind": "carrot_patch"}
+		return "Ease the pressure and support the rabbits before pushing the meadow forward."
 	if phase == "low":
-		return {"title": "The ecosystem is still fragile.", "detail": "Strengthen the living populations before asking more of the web.", "kind": "rabbit"}
+		return "Add a little life or food, then watch where the animals choose to settle."
+	if phase == "evidence" and str(objective.get("id", "")) == "nursery_network":
+		for configured in progress.get("criteria", []):
+			var criterion: Dictionary = configured
+			if bool(criterion.get("met", false)):
+				continue
+			if str(criterion.get("type", "")) == "safe_havens":
+				return "Build three well-spaced food patches and keep at least three rabbits around each one. All three groups need to hold at the same time."
 	if phase == "stabilizing":
-		return {"title": "The pattern is taking hold.", "detail": "Give the ecosystem room to settle without disrupting it.", "kind": "leaf"}
-	match objective_id:
-		"founders_forage":
-			return {"title": "Help every founder discover forage.", "detail": "Place food close enough for the founding rabbits to reach it.", "kind": "carrot_patch"}
-		"first_new_life", "life_returns":
-			return {"title": "Make room for new life.", "detail": "Keep adult rabbits together, well fed, and undisturbed.", "kind": "rabbit"}
-		"next_generation":
-			return {"title": "Support the young generation.", "detail": "Let a rabbit born here grow and find food for itself.", "kind": "rabbit"}
-		"first_hunt":
-			return {"title": "Let predation begin naturally.", "detail": "Keep a fox near healthy prey and wait for a successful hunt.", "kind": "fox"}
-		"two_safe_havens":
-			return {"title": "Create two true refuges.", "detail": "Separate viable rabbit groups and give each group reachable forage.", "kind": "rabbit"}
-		"predators_find_place":
-			return {"title": "Help both predators find their place.", "detail": "Let each fox feed while the rabbit colony continues to renew.", "kind": "fox"}
-		"living_ecosystem":
-			return {"title": "Watch for a living rhythm.", "detail": "Let renewal and successful hunts alternate while the whole web stays healthy.", "kind": "leaf"}
-	return {"title": "Watch the ecosystem.", "detail": "Respond to what the living web needs.", "kind": "leaf"}
+		return "The meadow is finding its balance. Keep changes gentle and let it settle."
+	return str(objective.get("guidance", ""))
 
-func _hide_objective_mechanics() -> void:
-	objective_requirements_heading.visible = false
-	for row in objective_goal_rows.values():
-		row.visible = false
-	objective_evidence_row.visible = false
-	objective_evidence.visible = false
-	objective_steps_box.visible = false
-	objective_trend_row.visible = false
-	objective_progress_row.visible = false
-	objective_coach_panel.visible = true
-	objective_progress_target = 0.0
+func _on_objective_details_toggled(_open: bool) -> void:
+	objective_layout_mode = ""
+	_layout_interface.call_deferred()
 
-func _refresh_evidence_requirement(progress: Dictionary) -> void:
-	var sequence: Array = progress["sequence"]
-	var birth_target := int(progress["birth_target"])
-	var hunt_target := int(progress["hunt_target"])
-	if not sequence.is_empty():
-		var sequence_progress := int(progress["sequence_progress"])
-		objective_steps_box.visible = true
-		objective_evidence_title.text = "COMPLETE IN ORDER"
-		if bool(progress["sequence_completed"]):
-			objective_evidence_value.text = "COMPLETE"
-			objective_evidence_value.theme_type_variation = "CaptionSuccess"
-			objective_evidence.text = "Cycle complete — it stays complete while you hold the balance."
-		elif bool(progress["sequence_started"]):
-			objective_evidence_value.text = "%s left" % _format_short_time(float(progress["sequence_time_remaining"]))
-			objective_evidence_value.theme_type_variation = "CaptionAccent"
-			objective_evidence.text = "Complete the highlighted step. Other events won't reset the cycle."
-		else:
-			objective_evidence_value.text = "%s window" % _format_short_time(float(progress["evidence_window"]))
-			objective_evidence_value.theme_type_variation = "Caption"
-			objective_evidence.text = "The timer starts when the first highlighted event happens."
-		for index in range(objective_steps.size()):
-			var visible := index < sequence.size()
-			objective_steps[index]["panel"].visible = visible
-			if visible:
-				_refresh_objective_step(index, str(sequence[index]), sequence, sequence_progress)
-		return
-	objective_steps_box.visible = birth_target > 0 or hunt_target > 0
-	for step in objective_steps:
-		step["panel"].visible = false
-	if birth_target > 0 or hunt_target > 0:
-		if birth_target > 0 and hunt_target == 0:
-			objective_evidence_title.text = "PROVE THE COLONY"
-			objective_evidence_value.text = "%d / %d" % [int(progress["birth_count"]), birth_target]
-			objective_evidence.text = "Only a natural birth counts — placing a rabbit does not."
-			objective_steps[0]["panel"].visible = true
-			_refresh_objective_step(0, "birth", ["birth"], 1 if bool(progress["evidence_met"]) else 0)
-		elif hunt_target > 0 and birth_target == 0:
-			objective_evidence_title.text = "PROVE PREDATION"
-			objective_evidence_value.text = "%d / %d" % [int(progress["hunt_count"]), hunt_target]
-			objective_evidence.text = "A chase does not count; a fox must catch a living rabbit."
-			objective_steps[0]["panel"].visible = true
-			_refresh_objective_step(0, "hunt", ["hunt"], 1 if bool(progress["evidence_met"]) else 0)
-		else:
-			objective_evidence_title.text = "PROVE THE FOOD WEB"
-			objective_evidence_value.text = "%d/%d · %d/%d" % [int(progress["birth_count"]), birth_target, int(progress["hunt_count"]), hunt_target]
-			objective_evidence.text = "Natural births and successful hunts both count."
-		objective_evidence_value.theme_type_variation = "CaptionSuccess" if bool(progress["evidence_met"]) else "Caption"
-		return
-	objective_evidence_row.visible = false
-	objective_evidence.visible = false
+func _checkpoint_semantic_state(run_state: String, phase: String) -> String:
+	if run_state == RunDirector.STATE_CRITICAL or phase in ["starving", "declining"]:
+		return "danger"
+	if run_state in [RunDirector.STATE_COMPLETED, RunDirector.STATE_SANDBOX] or phase == "stabilizing":
+		return "success"
+	return "warning" if phase in ["low", "evidence"] else "normal"
 
-func _refresh_objective_step(index: int, event_type: String, sequence: Array, progress: int) -> void:
-	var step: Dictionary = objective_steps[index]
-	var step_state := "complete" if index < progress else ("current" if index == progress else "future")
-	step["panel"].theme_type_variation = "ObjectiveStep%s" % step_state.capitalize()
-	step["marker"].text = "✓" if step_state == "complete" else str(index + 1)
-	step["marker"].theme_type_variation = "LabelSuccess" if step_state == "complete" else ("LabelWarning" if step_state == "current" else "LabelSecondary")
-	step["glyph"].configure("fox" if event_type == "hunt" else "rabbit", Color.TRANSPARENT, false)
-	step["glyph"].set_muted(step_state == "future")
-	step["title"].text = _sequence_step_title(event_type, index, sequence)
-	step["title"].theme_type_variation = "LabelSuccess" if step_state == "complete" else ("LabelStrong" if step_state == "current" else "LabelSecondary")
-	step["helper"].text = _event_helper(event_type, index, sequence)
-	step["helper"].visible = step_state == "current"
-	step["state"].text = "DONE" if step_state == "complete" else ("NEXT" if step_state == "current" else "")
-	step["state"].theme_type_variation = "CaptionSuccess" if step_state == "complete" else "CaptionAccent"
-
-func _sequence_step_title(event_type: String, index: int, sequence: Array) -> String:
-	var occurrence := 0
-	for prior in range(index + 1):
-		if str(sequence[prior]) == event_type:
-			occurrence += 1
-	if event_type == "birth":
-		return "A baby rabbit is born" if occurrence == 1 else "Another baby rabbit is born"
-	if event_type == "hunt":
-		return "Fox catches a rabbit" if occurrence == 1 else "Fox catches another rabbit"
-	return event_type.capitalize()
-
-func _event_helper(event_type: String, index: int, sequence: Array) -> String:
-	if event_type == "birth":
-		return "Natural births count; placed rabbits don't."
-	if event_type == "hunt":
-		var has_prior_hunt := false
-		for prior in range(index):
-			if str(sequence[prior]) == "hunt":
-				has_prior_hunt = true
-		if has_prior_hunt:
-			return "A fox must catch again while enough rabbits survive."
-		return "A chase counts only when the fox catches a rabbit."
-	return "Wait for this ecosystem event to happen naturally."
-
-func _objective_coach(progress: Dictionary, run_state: String) -> Dictionary:
-	if run_state == RunDirector.STATE_CRITICAL:
-		return {"title": "Recover the rabbit colony first.", "detail": "Place rabbits or choose a recovery supply before continuing this chapter.", "kind": "rabbit"}
-	if not bool(progress["trend_met"]):
-		return {"title": "Pause new hunts and rebuild.", "detail": "Add forage and help the rabbit population recover from its rapid drop.", "kind": "carrot_patch"}
-	var rabbit_missing := int(progress["rabbit_target"]) - int(progress["rabbit_count"])
-	if rabbit_missing > 0:
-		return {"title": "Build the colony to %d rabbits." % int(progress["rabbit_target"]), "detail": "Place %d more %s near plentiful carrots or berries." % [rabbit_missing, "rabbit" if rabbit_missing == 1 else "rabbits"], "kind": "rabbit"}
-	var fox_missing := int(progress["fox_target"]) - int(progress["fox_count"])
-	if fox_missing > 0:
-		return {"title": "Place %d %s near the colony." % [fox_missing, "fox" if fox_missing == 1 else "foxes"], "detail": "Foxes hunt when hungry; keep the rabbit population safely above its target.", "kind": "fox"}
+func _checkpoint_action(default_action: Dictionary, progress: Dictionary) -> Dictionary:
+	var missing_rabbits := maxi(0, int(progress["rabbit_target"]) - int(progress["rabbit_count"]))
+	if missing_rabbits > 0:
+		return {
+			"title": "Bring %d more %s to the meadow." % [missing_rabbits, "rabbit" if missing_rabbits == 1 else "rabbits"],
+			"detail": "Place them near food and watch where the colony begins to gather.",
+			"kind": "rabbit",
+		}
+	var missing_foxes := maxi(0, int(progress["fox_target"]) - int(progress["fox_count"]))
+	if missing_foxes > 0:
+		return {
+			"title": "Make room for %d more %s." % [missing_foxes, "fox" if missing_foxes == 1 else "foxes"],
+			"detail": "Let the rabbit colony grow confident before adding more hunters.",
+			"kind": "fox",
+		}
+	if str(progress.get("phase", "")) != "evidence":
+		return default_action
+	for configured in progress.get("criteria", []):
+		var criterion: Dictionary = configured
+		if bool(criterion.get("met", false)):
+			continue
+		match str(criterion.get("type", "")):
+			"safe_havens":
+				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
+				var group_size := int(criterion.get("rabbits_per_group", 2))
+				return {"title": "Build %d more fed rabbit %s." % [missing, "group" if missing == 1 else "groups"], "detail": "Each group needs at least %d rabbits near a healthy food patch, separated from the other groups." % group_size, "kind": "rabbit"}
+			"separated_birth_zones":
+				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
+				return {"title": "Have births in %d more %s." % [missing, "area" if missing == 1 else "areas"], "detail": "Keep adult rabbits together near food in separate parts of the meadow.", "kind": "rabbit"}
+			"born_rabbit_fed":
+				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
+				return {"title": "Help %d more young %s grow and eat." % [missing, "rabbit" if missing == 1 else "rabbits"], "detail": "Keep their group near food while the young rabbits grow.", "kind": "rabbit"}
+			"rabbit_birth":
+				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
+				return {"title": "Wait for %d more rabbit %s." % [missing, "birth" if missing == 1 else "births"], "detail": "Keep adult rabbits together near food.", "kind": "rabbit"}
+			"distinct_foxes_fed":
+				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
+				return {"title": "Let %d more %s kill a rabbit." % [missing, "fox" if missing == 1 else "foxes"], "detail": "Keep enough rabbits spread through the meadow for both the foxes and the colony.", "kind": "fox"}
+			"prey_per_fox":
+				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
+				return {"title": "Raise rabbits per fox by %d." % missing, "detail": "Add food or pause before adding another fox.", "kind": "rabbit"}
+			"ordered_cycle":
+				break
 	var sequence: Array = progress["sequence"]
 	var sequence_progress := int(progress["sequence_progress"])
 	if not sequence.is_empty() and sequence_progress < sequence.size():
 		var event_type := str(sequence[sequence_progress])
 		return {
-			"title": "Help the rabbits produce offspring." if event_type == "birth" else "Wait for a fox to catch a rabbit.",
-			"detail": "Keep two adult, well-fed rabbits together near carrots or berries. Placed rabbits don't count." if event_type == "birth" else ("Let a fox catch one more rabbit, but keep the colony above its target." if _sequence_has_prior_event(sequence, sequence_progress, "hunt") else "Keep a fox near a healthy group of rabbits and wait for it to catch one."),
+			"title": "Wait for 1 rabbit birth." if event_type == "birth" else "Let a fox kill 1 rabbit.",
+			"detail": "Keep adult rabbits together near food." if event_type == "birth" else "Keep at least %d rabbits alive so the colony can recover." % int(progress.get("rabbit_target", 0)),
 			"kind": "rabbit" if event_type == "birth" else "fox",
 		}
-	if int(progress["birth_count"]) < int(progress["birth_target"]):
-		return {"title": "Help the rabbits produce offspring.", "detail": "Keep two adult, well-fed rabbits together near carrots or berries. Placed rabbits don't count.", "kind": "rabbit"}
-	if int(progress["hunt_count"]) < int(progress["hunt_target"]):
-		return {"title": "Wait for a fox to catch a rabbit.", "detail": "A chase alone does not count as a successful hunt.", "kind": "fox"}
-	var hold_remaining := ceili(float(progress["stability_target"]) - float(progress["stability_elapsed"]))
-	return {"title": "Keep every condition checked.", "detail": "Hold the ecosystem steady for %d more simulation seconds." % maxi(0, hold_remaining), "kind": "leaf"}
+	return default_action
 
-func _set_objective_coach(title: String, detail: String, kind: String) -> void:
-	objective_teaser.text = title
-	objective_coach_detail.text = detail
-	objective_coach_glyph.configure(kind, Color.TRANSPARENT, false)
-
-func _sequence_has_prior_event(sequence: Array, before_index: int, event_type: String) -> bool:
-	for index in range(before_index):
-		if str(sequence[index]) == event_type:
-			return true
-	return false
-
-func _hold_heading(objective_id: String, has_sequence: bool, active: bool) -> String:
-	if active:
-		if objective_id == "establish":
-			return "HOLDING THE COLONY"
-		if objective_id == "living_ecosystem":
-			return "HOLDING THE FOOD WEB"
-		return "HOLDING THE BALANCE"
-	if objective_id == "establish":
-		return "THEN HOLD THE COLONY"
-	if objective_id == "balance":
-		return "THEN HOLD THE BALANCE"
-	return "THEN HOLD THE FOOD WEB" if has_sequence else "THEN HOLD EVERY GOAL"
-
-func _hold_locked_reason(progress: Dictionary) -> String:
-	if not bool(progress["evidence_met"]):
-		return "Starts when the cycle above is complete." if not progress["sequence"].is_empty() else "Starts when the natural birth above is complete."
-	if not bool(progress["populations_met"]):
-		return "Starts when both populations reach their targets."
-	if not bool(progress["trend_met"]):
-		return "Reset because the rabbit population began dropping."
-	return "Starts when every goal is checked."
+func _qualitative_objective_coach(objective_id: String, phase: String, run_state: String) -> Dictionary:
+	if run_state == RunDirector.STATE_CRITICAL:
+		return {"title": "Save the rabbit colony.", "detail": "Bring food to the remaining rabbits and give them time to recover.", "kind": "rabbit"}
+	if phase == "starving":
+		return {"title": "Bring food closer.", "detail": "Help the animals under pressure find a meal, then wait.", "kind": "carrot_patch"}
+	if phase == "declining":
+		return {"title": "Give the meadow room to recover.", "detail": "Ease the pressure and support the rabbits before pushing ahead.", "kind": "carrot_patch"}
+	if phase == "low":
+		return {"title": "Strengthen the meadow first.", "detail": "Add a little life or food, then watch where the animals settle.", "kind": "rabbit"}
+	if phase == "stabilizing":
+		return {"title": "Let the pattern settle.", "detail": "The meadow is finding its balance; keep changes gentle.", "kind": "leaf"}
+	match objective_id:
+		"colony_gathers":
+			return {"title": "Start the colony.", "detail": "Place four rabbits near food with room to gather.", "kind": "rabbit"}
+		"new_arrivals":
+			return {"title": "Make room for new life.", "detail": "Keep adult rabbits together near food until two young rabbits arrive.", "kind": "rabbit"}
+		"young_foragers":
+			return {"title": "Help the young find food.", "detail": "Keep the meadow-born rabbits near replenishing food while they grow.", "kind": "rabbit"}
+		"birthplaces":
+			return {"title": "Spread new life across the meadow.", "detail": "Set up three well-spaced food patches with breeding rabbits nearby.", "kind": "rabbit"}
+		"nursery_network":
+			return {"title": "Build three lasting nurseries.", "detail": "Keep three groups of at least three rabbits near strong food patches.", "kind": "rabbit"}
+		"first_hunt":
+			return {"title": "Let a fox kill 1 rabbit.", "detail": "Keep at least 6 rabbits alive, then wait for a rabbit birth.", "kind": "fox"}
+		"life_returns":
+			return {"title": "Let a fox kill 1 rabbit.", "detail": "Complete kill → birth → kill while keeping at least 7 rabbits alive.", "kind": "fox"}
+		"two_safe_havens":
+			return {"title": "Keep both havens alive.", "detail": "Feed two rabbit groups and let the foxes move through without emptying either one.", "kind": "rabbit"}
+		"predators_find_place":
+			return {"title": "Help both predators share the meadow.", "detail": "Spread out food and rabbits so both foxes can feed while life continues.", "kind": "fox"}
+		"living_ecosystem":
+			return {"title": "Watch the whole meadow.", "detail": "Keep food in several places and let hunts and new life take turns.", "kind": "leaf"}
+	return {"title": "Watch the ecosystem.", "detail": "Respond to what the living meadow needs.", "kind": "leaf"}
 
 func _format_short_time(seconds: float) -> String:
 	var total := maxi(0, ceili(seconds))
@@ -1002,33 +920,11 @@ func _format_short_time(seconds: float) -> String:
 		return "%d sec" % total
 	return "%d:%02d" % [floori(float(total) / 60.0), total % 60]
 
-func _refresh_sequence_feedback(objective_id: String, progress: Dictionary) -> void:
-	var sequence: Array = progress["sequence"]
-	var current := int(progress["sequence_progress"])
-	if objective_id != last_objective_id:
-		last_objective_id = objective_id
-		last_sequence_progress = current
-		return
-	if sequence.is_empty():
-		last_sequence_progress = 0
-		return
-	if current > last_sequence_progress:
-		var completed_index := mini(current - 1, sequence.size() - 1)
-		show_toast("%d of %d · %s" % [current, sequence.size(), _sequence_step_title(str(sequence[completed_index]), completed_index, sequence)], 2.0)
-	elif current < last_sequence_progress and not bool(progress["sequence_completed"]):
-		show_toast("Cycle window ended · begin again with the first step", 2.8)
-	last_sequence_progress = current
-
 func _update_objective_layout(mode: String) -> void:
 	if objective_layout_mode == mode:
 		return
 	objective_layout_mode = mode
 	_layout_interface.call_deferred()
-
-func _set_requirement_state(check: Label, value: Label, complete: bool) -> void:
-	check.text = "✓" if complete else "○"
-	check.theme_type_variation = "LabelSuccess" if complete else "LabelSecondary"
-	value.theme_type_variation = "LabelSuccess" if complete else "LabelStrong"
 
 func _refresh_supply() -> void:
 	if systems.supply_pending:
@@ -1058,8 +954,16 @@ func process_visual(delta: float) -> void:
 		rabbit_loss_notice_time = maxf(0.0, rabbit_loss_notice_time - delta)
 		if is_zero_approx(rabbit_loss_notice_time):
 			rabbit_starvation_losses = 0
-	objective_progress.value = lerpf(objective_progress.value, objective_progress_target, 1.0 - exp(-delta * 7.0))
 	refresh()
+	_fit_objective_panel_to_content()
+
+func _fit_objective_panel_to_content() -> void:
+	var content_size := objective_panel.get_combined_minimum_size()
+	if objective_panel.size.is_equal_approx(content_size):
+		return
+	objective_panel.size = content_size
+	if root.size.x < 1030.0:
+		population_panel.position.y = objective_panel.position.y + objective_panel.size.y + ThemeSystem.SPACE.medium
 
 func show_supply_choices(choices: Array) -> void:
 	var reward_was_open := supply_overlay.visible or supply_peek_hud.visible
@@ -1069,6 +973,9 @@ func show_supply_choices(choices: Array) -> void:
 		supply_buttons[index].disabled = false
 		supply_buttons[index].modulate = Color.WHITE
 		supply_buttons[index].scale = Vector2.ONE
+		supply_buttons[index].theme_type_variation = "RewardChoiceButton"
+		if supply_buttons[index].has_focus():
+			supply_buttons[index].release_focus()
 		supply_buttons[index].size_flags_horizontal = Control.SIZE_SHRINK_CENTER if choices.size() == 1 else Control.SIZE_EXPAND_FILL
 		if not visible:
 			continue
@@ -1080,8 +987,7 @@ func show_supply_choices(choices: Array) -> void:
 		for item in bundle["items"]:
 			supply_card_contents[index].add_child(_make_supply_item(item, int(bundle["items"][item])))
 	supply_title.text = "A lifeline arrives" if systems.is_critical() else "Meadow Mail!"
-	supply_subtitle.text = "Your meadow is safe while you choose what helps it recover." if systems.is_critical() else "Choose one bundle for your satchel. Take all the time you need."
-	supply_resume_hint.text = "You were already paused — it will stay paused" if is_zero_approx(systems.supply_resume_speed) else "Resumes at %s after your choice" % _speed_name(systems.supply_resume_speed)
+	supply_subtitle.text = "Choose one bundle to help your meadow recover." if systems.is_critical() else "Choose one bundle for your satchel."
 	supply_claiming = false
 	if reward_was_open:
 		return
@@ -1089,6 +995,7 @@ func show_supply_choices(choices: Array) -> void:
 	supply_peek_hud.visible = false
 	supply_overlay.visible = true
 	supply_burst.visible = true
+	supply_burst.modulate = Color.WHITE
 	supply_burst.restart()
 	var target_color: Color = ThemeSystem.COLOR.scrim
 	supply_overlay.color = Color(target_color.r, target_color.g, target_color.b, 0.0)
@@ -1105,8 +1012,7 @@ func show_supply_choices(choices: Array) -> void:
 	tween.tween_property(supply_sheet, "scale", Vector2.ONE, 0.36).set_delay(0.06)
 	tween.tween_property(supply_sheet, "modulate", Color.WHITE, 0.24).set_delay(0.08)
 	if not choices.is_empty():
-		supply_focus_index = 0
-		supply_buttons[0].grab_focus.call_deferred()
+		supply_focus_index = -1
 
 func toggle_supply_peek() -> void:
 	if systems == null or not systems.supply_pending or supply_claiming:
@@ -1122,6 +1028,7 @@ func _set_supply_peeking(peeking: bool) -> void:
 	if peeking == supply_peeking:
 		return
 	if peeking:
+		supply_focus_index = -1
 		for index in range(supply_buttons.size()):
 			if supply_buttons[index].has_focus():
 				supply_focus_index = index
@@ -1151,7 +1058,7 @@ func _set_supply_peeking(peeking: bool) -> void:
 		tween.chain().tween_callback(func() -> void:
 			if not supply_peeking:
 				supply_peek_hud.visible = false
-				if supply_focus_index < supply_buttons.size() and supply_buttons[supply_focus_index].visible:
+				if supply_focus_index >= 0 and supply_focus_index < supply_buttons.size() and supply_buttons[supply_focus_index].visible:
 					supply_buttons[supply_focus_index].grab_focus()
 		)
 
@@ -1188,9 +1095,6 @@ func _bundle_role(items: Dictionary) -> String:
 		return "Add rabbits and forage"
 	return "Grow fresh food"
 
-func _speed_name(speed: float) -> String:
-	return "%d×" % int(speed)
-
 func _bundle_summary(items: Dictionary) -> String:
 	var parts: Array[String] = []
 	for item in items:
@@ -1226,16 +1130,28 @@ func _on_supply_pressed(index: int) -> void:
 	for button_index in range(supply_buttons.size()):
 		var button: Button = supply_buttons[button_index]
 		button.disabled = true
-		if button.visible and button_index != index:
-			button.modulate = Color(1.0, 1.0, 1.0, 0.42)
 	var chosen: Button = supply_buttons[index]
+	chosen.theme_type_variation = "RewardChoiceButtonChosen"
 	chosen.pivot_offset = chosen.size * 0.5
 	var tween := create_tween()
 	tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tween.tween_property(chosen, "scale", Vector2.ONE * 1.025, 0.12)
-	tween.parallel().tween_property(chosen, "modulate", ThemeSystem.COLOR.accent_soft, 0.12)
-	tween.tween_interval(0.12)
-	tween.tween_callback(_commit_supply_choice.bind(index))
+	for button_index in range(supply_buttons.size()):
+		var button: Button = supply_buttons[button_index]
+		if button.visible and button_index != index:
+			tween.parallel().tween_property(button, "modulate", Color(1.0, 1.0, 1.0, 0.42), 0.12)
+	tween.tween_interval(0.10)
+	tween.tween_callback(_animate_supply_choice_out.bind(index))
+
+func _animate_supply_choice_out(index: int) -> void:
+	var tween := create_tween().set_parallel(true)
+	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_property(supply_sheet, "position", supply_sheet.position - Vector2(0.0, 18.0), 0.28)
+	tween.tween_property(supply_sheet, "scale", Vector2.ONE * 0.97, 0.28)
+	tween.tween_property(supply_sheet, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.24)
+	tween.tween_property(supply_burst, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.18)
+	tween.tween_property(supply_overlay, "color:a", 0.0, 0.28).set_delay(0.04)
+	tween.chain().tween_callback(_commit_supply_choice.bind(index))
 
 func _commit_supply_choice(index: int) -> void:
 	supply_selected.emit(index)

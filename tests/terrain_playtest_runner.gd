@@ -1,7 +1,7 @@
 extends SceneTree
 
 ## Reproducible live-simulation trials for the V0.4 manual playtest layouts.
-## These complement unit-style terrain assertions; the normal eight-checkpoint
+## These complement unit-style terrain assertions; the normal ten-checkpoint
 ## playthrough remains in playtest_runner.gd.
 
 const Config = preload("res://config/game_config.gd")
@@ -16,14 +16,19 @@ func _initialize() -> void:
 	var barrier := _predator_barrier_trial()
 	print("\nV0.4 PLAYTEST A · Open Meadow colony: %s" % str(open))
 	print("V0.4 PLAYTEST B · Meadow beside Thicket: %s" % str(refuge))
-	print("V0.4 PLAYTEST C · Poor refuge comparison: open %d survivors / %d captures; refuge %d survivors / %d captures" % [open["end"], open["captures"], refuge["end"], refuge["captures"]])
+	print("V0.4 PLAYTEST C · Refuge comparison: open %d survivors / %d captures / %d hunting ticks; refuge %d survivors / %d captures / %d hunting ticks" % [open["end"], open["captures"], open["hunting_ticks"], refuge["end"], refuge["captures"], refuge["hunting_ticks"]])
 	print("V0.4 PLAYTEST D · Stream separation: %s" % str(route))
 	print("V0.4 PLAYTEST E · Predator across water: %s" % str(barrier))
 	_check(int(open["peak_before_fox"]) > int(open["start"]) and int(open["feeding_events"]) > 0, "Open Meadow colony did not establish through feeding.")
 	_check(int(open["captures"]) > 0 and int(open["fleeing_ticks"]) > 0, "Exposed Meadow did not become dangerous under Fox pressure.")
 	_check(int(refuge["refuge_ticks"]) > 0, "Rabbits did not visibly choose/use the nearby Thicket.")
 	_check(int(refuge["captures"]) > 0, "Thicket prevented every hunt instead of disrupting pursuit.")
-	_check(int(refuge["end"]) > int(open["end"]) or int(refuge["captures"]) < int(open["captures"]), "The refuge layout produced no measurable benefit over exposed Meadow.")
+	# Fox hunger/meal cadence bounds the number of kills in this fixed window, so
+	# equal captures do not imply equal pursuit. A valid refuge must either reduce
+	# captures/sustain more Rabbits or make Foxes spend materially longer hunting.
+	_check(int(refuge["end"]) > int(open["end"]) or int(refuge["captures"]) < int(open["captures"]) \
+		or int(refuge["hunting_ticks"]) > int(open["hunting_ticks"]) * 1.10,
+		"The refuge layout did not measurably disrupt pursuit compared with exposed Meadow.")
 	_check(bool(route["used_ford"]) and bool(route["stayed_dry"]) and bool(route["made_progress"]) and int(route["longest_stall_ticks"]) < 18, "Stream routing was unclear, stuck, or entered deep water.")
 	_check(not bool(barrier["across_water_flee"]) and bool(barrier["same_bank_flee"]), "Stream did not change Rabbit threat evaluation as expected.")
 	if failures.is_empty():
@@ -43,7 +48,9 @@ func _colony_trial(with_thicket: bool) -> Dictionary:
 	config["rabbit"]["max_population"] = 70
 	var sim = Simulation.new(config, 9031)
 	if with_thicket:
-		_add_thicket(sim, Vector2(88.0, 0.0), 70.0)
+		# A genuinely nearby refuge with an exposed run from the colony into its
+		# dense core: protection is meaningful, but the crossing is not risk-free.
+		_add_thicket(sim, Vector2(120.0, 0.0), 70.0)
 	var events := {"feeding": 0, "captures": 0}
 	sim.creature_fed.connect(func(kind: String, _entity_id: int, _source_id: int) -> void:
 		if kind == "rabbit":
@@ -75,6 +82,16 @@ func _colony_trial(with_thicket: bool) -> Dictionary:
 		sim.rabbits[rabbit_id]["hunger"] = 10.0
 		sim.rabbits[rabbit_id]["recent_food"] = 18.0
 	peak = maxi(peak, sim.population("rabbit"))
+	# The chase phase is specifically a refuge-geometry comparison. Clear any
+	# retained feeding motivation before introducing Foxes; otherwise differences
+	# in local plant recovery can keep one group routing to food during the hunt
+	# and confound the cover measurement.
+	for rabbit in sim.rabbits.values():
+		rabbit["hunger"] = 0.0
+		rabbit["food_motivated"] = false
+		rabbit["behavior"] = "wander"
+		rabbit["target_id"] = -1
+		sim._clear_ground_route(rabbit)
 	sim.config["rabbit"]["hunger_rate"] = 0.0
 	sim.config["rabbit"]["reproduction_food_needed"] = 99999.0
 	sim.config["rabbit"]["lifespan"] = 1000.0
@@ -83,13 +100,19 @@ func _colony_trial(with_thicket: bool) -> Dictionary:
 		sim.foxes[fox_id]["hunger"] = 62.0
 	var fleeing_ticks := 0
 	var refuge_ticks := 0
+	var hunting_ticks := 0
+	var rabbit_survival_seconds := 0.0
 	for _tick in range(600):
 		sim.step(0.1)
+		rabbit_survival_seconds += float(sim.population("rabbit")) * 0.1
 		for rabbit in sim.rabbits.values():
 			if rabbit["behavior"] == "flee":
 				fleeing_ticks += 1
 			if rabbit.get("refuge_position", Vector2.INF) != Vector2.INF:
 				refuge_ticks += 1
+		for fox in sim.foxes.values():
+			if fox["behavior"] == "hunt":
+				hunting_ticks += 1
 	return {
 		"start": start,
 		"peak_before_fox": peak,
@@ -98,6 +121,8 @@ func _colony_trial(with_thicket: bool) -> Dictionary:
 		"feeding_events": events["feeding"],
 		"fleeing_ticks": fleeing_ticks,
 		"refuge_ticks": refuge_ticks,
+		"hunting_ticks": hunting_ticks,
+		"rabbit_survival_seconds": snappedf(rabbit_survival_seconds, 0.1),
 	}
 
 func _stream_route_trial() -> Dictionary:

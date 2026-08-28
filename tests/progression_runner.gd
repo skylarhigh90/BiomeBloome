@@ -9,17 +9,21 @@ var passed := 0
 
 func _initialize() -> void:
 	_test_checkpoint_contract_and_reward_tiers()
-	_test_founders_require_distinct_actual_feeding()
-	_test_first_new_life_requires_birth()
-	_test_next_generation_requires_born_survivor_to_feed()
+	_test_colony_gathers_requires_population()
+	_test_new_arrivals_requires_two_births()
+	_test_young_foragers_require_born_rabbits_to_feed()
+	_test_birthplaces_require_three_separated_births()
+	_test_nursery_network_requires_three_live_groups()
 	_test_first_hunt_requires_successful_predation()
 	_test_life_returns_requires_fresh_birth()
 	_test_two_safe_havens_are_spatial_and_stable()
+	_test_local_nurseries_survive_unfed_rabbit_bridges()
+	_test_safe_haven_counter_supports_three_zones()
 	_test_two_distinct_foxes_and_birth_are_required()
 	_test_final_cycle_is_fresh_ordered_and_latched()
 	_test_reward_timing_and_persistent_expansions()
 	_test_supply_pool_progression()
-	_test_critical_is_armed_only_after_next_generation()
+	_test_critical_is_armed_only_after_nursery_network()
 	_test_loss_of_breeding_group_enters_critical_at_one_x()
 	_test_fox_extinction_is_not_game_over()
 	_test_inventory_and_pending_supply_do_not_prevent_critical()
@@ -27,12 +31,15 @@ func _initialize() -> void:
 	_test_recovery_requires_living_settling_period()
 	_test_failed_recovery_causes_game_over()
 	_test_first_recovery_supply_is_not_repeated()
-	_test_normal_ui_hides_internal_progression_mechanics()
+	_test_checkpoint_ui_uses_compact_live_progress()
+	_test_checkpoint_ui_maps_every_evidence_type()
+	_test_checkpoint_ui_distinguishes_live_hunger_states()
+	_test_checkpoint_ui_uses_player_facing_guidance()
 	_test_minor_and_major_feedback_are_distinct()
 	_test_debug_retains_exact_evaluator_detail()
 	_test_completion_ui_and_sandbox_epilogue()
 	_test_fresh_system_resets_the_run()
-	print("\n%d V0.3 progression tests passed; %d failed." % [passed, failures.size()])
+	print("\n%d V0.5 compound progression tests passed; %d failed." % [passed, failures.size()])
 	for failure in failures:
 		printerr("FAILED: %s" % failure)
 	quit(1 if not failures.is_empty() else 0)
@@ -41,6 +48,7 @@ func _fast_config() -> Dictionary:
 	var config := Config.make().duplicate(true)
 	config["simulation"]["max_steps_per_frame"] = 1000
 	config["supply"]["interval"] = 100.0
+	config["progression"]["spatial_sample_interval"] = 0.0
 	config["rabbit"]["hunger_rate"] = 0.0
 	config["rabbit"]["lifespan"] = 9999.0
 	config["fox"]["hunger_rate"] = 0.0
@@ -48,7 +56,9 @@ func _fast_config() -> Dictionary:
 	for milestone in config["progression"]["milestones"]:
 		milestone["stabilization"] = 0.2
 		milestone["severe_decline_fraction"] = 1.1
-	config["progression"]["milestones"][2]["born_survival_age"] = 0.0
+	for criterion in config["progression"]["milestones"][2]["criteria"]:
+		if str(criterion["type"]) == "born_rabbit_fed":
+			criterion["minimum_age"] = 0.0
 	config["progression"]["critical"]["entry_debounce"] = 0.2
 	config["progression"]["critical"]["recovery_settling"] = 0.3
 	config["progression"]["critical"]["grace_duration"] = 1.2
@@ -76,77 +86,94 @@ func _kill_all_rabbits(systems, cause: String = "test") -> void:
 	for rabbit_id in systems.simulation.rabbits.keys():
 		systems.simulation.kill_rabbit(rabbit_id, cause)
 
-func _feed_current_founders(systems) -> void:
-	_ensure_rabbits(systems, 4)
-	for rabbit_id in systems.simulation.rabbits.keys().slice(0, 4):
-		systems.run_director.record_creature_fed("rabbit", rabbit_id, -1)
+func _arrange_two_havens(systems, rabbit_count: int = 12) -> void:
+	_arrange_havens(systems, rabbit_count, 2)
 
-func _arrange_two_havens(systems) -> void:
-	_ensure_rabbits(systems, 6)
+func _arrange_havens(systems, rabbit_count: int, haven_count: int) -> void:
+	_ensure_rabbits(systems, rabbit_count)
+	var centers := [Vector2(-230.0, -140.0), Vector2(230.0, -140.0)]
+	if haven_count >= 3:
+		centers.append(Vector2(240.0, 180.0))
 	var ids: Array = systems.simulation.rabbits.keys()
 	for index in range(ids.size()):
-		var side := -1.0 if index % 2 == 0 else 1.0
-		var row := float(index / 2)
+		var center: Vector2 = centers[index % centers.size()]
+		var row := float(index / centers.size())
 		var rabbit: Dictionary = systems.simulation.rabbits[ids[index]]
-		rabbit["position"] = Vector2(side * 210.0, row * 16.0)
+		rabbit["position"] = center + Vector2(0.0, row * 16.0)
 		rabbit["previous_position"] = rabbit["position"]
 		rabbit["velocity"] = Vector2.ZERO
 		rabbit["previous_velocity"] = Vector2.ZERO
-	for plant in systems.simulation.plants.values():
-		plant["food"] = 0.0
-	systems.simulation.add_plant("berry_bush", Vector2(-210.0, 10.0))
-	systems.simulation.add_plant("berry_bush", Vector2(210.0, 10.0))
+	for center in centers:
+		for row in range(3):
+			var plant_id: int = systems.simulation.add_plant("berry_bush", center + Vector2(0.0, 8.0 + float(row) * 24.0))
+			systems.simulation.plants[plant_id]["food"] = 30.0
 
 func _satisfy_current_checkpoint(systems) -> void:
 	match systems.run_director.current_milestone_id():
-		"founders_forage":
-			_feed_current_founders(systems)
-		"first_new_life":
-			_ensure_rabbits(systems, 2)
-			systems.simulation.add_rabbit(Vector2(22.0, 8.0), "birth")
-		"next_generation":
+		"colony_gathers":
 			_ensure_rabbits(systems, 4)
-			var young_id: int = systems.simulation.add_rabbit(Vector2(24.0, 8.0), "birth")
-			systems.simulation.rabbits[young_id]["age"] = 12.0
-			systems.run_director.record_creature_fed("rabbit", young_id, -1)
+		"new_arrivals":
+			_ensure_rabbits(systems, 4)
+			systems.simulation.add_rabbit(Vector2(-24.0, 8.0), "birth")
+			systems.simulation.add_rabbit(Vector2(24.0, 8.0), "birth")
+		"young_foragers":
+			_ensure_rabbits(systems, 8)
+			for young_id in systems.run_director.born_rabbit_ids.keys().slice(0, 2):
+				systems.simulation.rabbits[young_id]["age"] = 12.0
+				systems.run_director.record_creature_fed("rabbit", young_id, -1)
+		"birthplaces":
+			_ensure_rabbits(systems, 10)
+			for center in [Vector2(-230.0, -140.0), Vector2(230.0, -140.0), Vector2(240.0, 180.0)]:
+				systems.simulation.add_rabbit(center, "birth")
+		"nursery_network":
+			_arrange_havens(systems, 12, 3)
 		"first_hunt":
-			_ensure_rabbits(systems, 5)
+			_ensure_rabbits(systems, 8)
 			_ensure_foxes(systems, 1)
 			var fox_id: int = systems.simulation.foxes.keys()[0]
 			var prey_id: int = systems.simulation.rabbits.keys()[0]
 			systems.run_director.record_predation(fox_id, prey_id, systems.simulation.rabbits[prey_id]["position"])
-		"life_returns":
-			_ensure_rabbits(systems, 4)
-			_ensure_foxes(systems, 1)
 			systems.simulation.add_rabbit(Vector2(28.0, 8.0), "birth")
+		"life_returns":
+			_ensure_rabbits(systems, 9)
+			_ensure_foxes(systems, 1)
+			var fox_id: int = systems.simulation.foxes.keys()[0]
+			systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[0], Vector2.ZERO)
+			systems.simulation.add_rabbit(Vector2(30.0, 8.0), "birth")
+			systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[1], Vector2.ZERO)
 		"two_safe_havens":
-			_arrange_two_havens(systems)
+			_arrange_two_havens(systems, 10)
+			_ensure_foxes(systems, 1)
+			var fox_id: int = systems.simulation.foxes.keys()[0]
+			systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[0], Vector2.ZERO)
+			systems.simulation.add_rabbit(Vector2(-210.0, 8.0), "birth")
 		"predators_find_place":
-			_ensure_rabbits(systems, 6)
+			_arrange_havens(systems, 12, 3)
 			_ensure_foxes(systems, 2)
 			var fox_ids: Array = systems.simulation.foxes.keys()
-			systems.run_director.record_creature_fed("fox", fox_ids[0], -1)
-			systems.run_director.record_creature_fed("fox", fox_ids[1], -1)
-			systems.simulation.add_rabbit(Vector2(30.0, 8.0), "birth")
+			systems.run_director.record_predation(fox_ids[0], systems.simulation.rabbits.keys()[0], Vector2.ZERO)
+			systems.simulation.add_rabbit(Vector2(-210.0, 8.0), "birth")
+			systems.run_director.record_predation(fox_ids[1], systems.simulation.rabbits.keys()[1], Vector2.ZERO)
 		"living_ecosystem":
-			_ensure_rabbits(systems, 8)
+			_arrange_havens(systems, 14, 3)
 			_ensure_foxes(systems, 2)
-			var fox_id: int = systems.simulation.foxes.keys()[0]
-			systems.simulation.add_rabbit(Vector2(34.0, 8.0), "birth")
-			systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[0], Vector2.ZERO)
-			systems.simulation.add_rabbit(Vector2(38.0, 8.0), "birth")
-			systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[1], Vector2.ZERO)
+			var fox_ids: Array = systems.simulation.foxes.keys()
+			systems.run_director.record_predation(fox_ids[0], systems.simulation.rabbits.keys()[0], Vector2.ZERO)
+			systems.simulation.add_rabbit(Vector2(-210.0, 8.0), "birth")
+			systems.run_director.record_predation(fox_ids[1], systems.simulation.rabbits.keys()[1], Vector2.ZERO)
+			systems.simulation.add_rabbit(Vector2(210.0, 8.0), "birth")
+			systems.run_director.record_predation(fox_ids[0], systems.simulation.rabbits.keys()[2], Vector2.ZERO)
 	systems.advance(0.3)
 
 func _advance_to(systems, milestone_id: String) -> void:
 	var guard := 0
-	while systems.run_director.current_milestone_id() != milestone_id and systems.run_director.run_state == RunDirector.STATE_PLAYING and guard < 12:
+	while systems.run_director.current_milestone_id() != milestone_id and systems.run_director.run_state == RunDirector.STATE_PLAYING and guard < 16:
 		_satisfy_current_checkpoint(systems)
 		guard += 1
 
 func _complete_run(systems) -> void:
 	var guard := 0
-	while systems.run_director.run_state == RunDirector.STATE_PLAYING and guard < 12:
+	while systems.run_director.run_state == RunDirector.STATE_PLAYING and guard < 16:
 		_satisfy_current_checkpoint(systems)
 		guard += 1
 
@@ -154,53 +181,92 @@ func _test_checkpoint_contract_and_reward_tiers() -> void:
 	var config := Config.make()
 	var ids: Array[String] = []
 	var tiers: Array[String] = []
+	var sequences: Array = []
+	var criterion_counts: Array[int] = []
+	var safe_haven_targets: Array[int] = []
+	var rabbit_targets: Array[int] = []
 	for milestone in config["progression"]["milestones"]:
 		ids.append(str(milestone["id"]))
 		tiers.append(str(milestone["tier"]))
-	_expect(ids == ["founders_forage", "first_new_life", "next_generation", "first_hunt", "life_returns", "two_safe_havens", "predators_find_place", "living_ecosystem"] \
-		and tiers == ["minor", "minor", "major", "minor", "major", "minor", "major", "final"], "the run uses the locked eight-checkpoint order and reward tiers")
+		sequences.append(milestone.get("event_sequence", []))
+		criterion_counts.append(milestone.get("criteria", []).size())
+		rabbit_targets.append(int(milestone.get("rabbit_min", 0)))
+		for criterion in milestone.get("criteria", []):
+			if str(criterion.get("type", "")) == "safe_havens":
+				safe_haven_targets.append(int(criterion.get("target", 0)))
+	_expect(ids == ["colony_gathers", "new_arrivals", "young_foragers", "birthplaces", "nursery_network", "first_hunt", "life_returns", "two_safe_havens", "predators_find_place", "living_ecosystem"] \
+		and tiers == ["minor", "minor", "minor", "minor", "major", "minor", "major", "minor", "major", "final"] \
+		and sequences[5] == ["hunt", "birth"] \
+		and sequences[6] == ["hunt", "birth", "hunt"] \
+		and sequences[9] == ["hunt", "birth", "hunt", "birth", "hunt"] \
+		and criterion_counts == [0, 1, 1, 1, 1, 1, 1, 2, 4, 5] \
+		and rabbit_targets == [4, 6, 8, 10, 12, 6, 7, 8, 10, 12] \
+		and safe_haven_targets == [3, 2, 3, 3], "the ten-checkpoint arc adds a deliberate five-step rabbit opening before the existing predator progression")
 
-func _test_founders_require_distinct_actual_feeding() -> void:
+func _test_colony_gathers_requires_population() -> void:
 	var systems = Systems.new(_fast_config())
+	_ensure_rabbits(systems, 3)
+	systems.advance(0.3)
+	var three_blocked: bool = systems.run_director.current_milestone_id() == "colony_gathers"
 	_ensure_rabbits(systems, 4)
-	var rabbit_ids: Array = systems.simulation.rabbits.keys()
-	var plant_id: int = systems.simulation.add_plant("berry_bush", Vector2.ZERO)
-	for repeat in range(4):
-		systems.simulation._consume_plant(systems.simulation.rabbits[rabbit_ids[0]], systems.simulation.plants[plant_id], 0.05)
 	systems.advance(0.3)
-	var repeated_blocked: bool = systems.run_director.current_milestone_id() == "founders_forage"
-	for index in range(1, 4):
-		systems.simulation._consume_plant(systems.simulation.rabbits[rabbit_ids[index]], systems.simulation.plants[plant_id], 0.05)
-	systems.advance(0.3)
-	_expect(repeated_blocked and systems.run_director.has_completed("founders_forage"), "Founders Find Forage requires distinct placed rabbits to actually feed")
+	_expect(three_blocked and systems.run_director.has_completed("colony_gathers"), "A Colony Gathers requires the player to establish the four-rabbit population target")
 
-func _test_first_new_life_requires_birth() -> void:
+func _test_new_arrivals_requires_two_births() -> void:
 	var systems = Systems.new(_fast_config())
-	_advance_to(systems, "first_new_life")
+	_advance_to(systems, "new_arrivals")
 	_ensure_rabbits(systems, 8)
-	systems.advance(0.4)
-	var placements_blocked: bool = systems.run_director.current_milestone_id() == "first_new_life"
-	systems.simulation.add_rabbit(Vector2(55.0, 0.0), "birth")
 	systems.advance(0.3)
-	_expect(placements_blocked and systems.run_director.has_completed("first_new_life"), "First New Life counts a natural birth, not placed rabbits")
+	var placements_blocked: bool = systems.run_director.current_milestone_id() == "new_arrivals"
+	systems.simulation.add_rabbit(Vector2(-20.0, 0.0), "birth")
+	systems.advance(0.3)
+	var one_birth_blocked: bool = systems.run_director.current_milestone_id() == "new_arrivals"
+	systems.simulation.add_rabbit(Vector2(20.0, 0.0), "birth")
+	systems.advance(0.3)
+	_expect(placements_blocked and one_birth_blocked and systems.run_director.has_completed("new_arrivals"), "New Arrivals requires two natural births; placed rabbits cannot satisfy the target")
 
-func _test_next_generation_requires_born_survivor_to_feed() -> void:
+func _test_young_foragers_require_born_rabbits_to_feed() -> void:
+	var systems = Systems.new(_fast_config())
+	_advance_to(systems, "young_foragers")
+	_ensure_rabbits(systems, 8)
+	var placed_ids: Array = systems.run_director.placed_rabbit_ids.keys()
+	systems.run_director.record_creature_fed("rabbit", placed_ids[0], -1)
+	systems.advance(0.3)
+	var placed_feeding_blocked: bool = systems.run_director.current_milestone_id() == "young_foragers"
+	var young_ids: Array = systems.run_director.born_rabbit_ids.keys()
+	for young_id in young_ids:
+		systems.simulation.rabbits[young_id]["age"] = 12.0
+	systems.run_director.record_creature_fed("rabbit", young_ids[0], -1)
+	systems.advance(0.3)
+	var one_young_blocked: bool = systems.run_director.current_milestone_id() == "young_foragers"
+	systems.run_director.record_creature_fed("rabbit", young_ids[1], -1)
+	systems.advance(0.3)
+	_expect(placed_feeding_blocked and one_young_blocked and systems.run_director.has_completed("young_foragers"), "Young Foragers requires two meadow-born rabbits to grow and feed")
+
+func _test_birthplaces_require_three_separated_births() -> void:
+	var systems = Systems.new(_fast_config())
+	_advance_to(systems, "birthplaces")
+	_ensure_rabbits(systems, 10)
+	systems.simulation.add_rabbit(Vector2(-230.0, -140.0), "birth")
+	systems.simulation.add_rabbit(Vector2(-210.0, -140.0), "birth")
+	systems.simulation.add_rabbit(Vector2(230.0, -140.0), "birth")
+	systems.advance(0.3)
+	var two_areas_blocked: bool = systems.run_director.current_milestone_id() == "birthplaces"
+	systems.simulation.add_rabbit(Vector2(240.0, 180.0), "birth")
+	systems.advance(0.3)
+	_expect(two_areas_blocked and systems.run_director.has_completed("birthplaces"), "Life Across the Meadow requires fresh births in three genuinely separated areas")
+
+func _test_nursery_network_requires_three_live_groups() -> void:
 	var config := _fast_config()
-	config["progression"]["milestones"][2]["born_survival_age"] = 1.0
+	config["progression"]["milestones"][4]["stabilization"] = 0.5
 	var systems = Systems.new(config)
-	_advance_to(systems, "next_generation")
-	_ensure_rabbits(systems, 4)
-	var placed_id: int = systems.simulation.rabbits.keys()[0]
-	systems.run_director.record_creature_fed("rabbit", placed_id, -1)
-	systems.advance(0.3)
-	var placed_blocked: bool = systems.run_director.current_milestone_id() == "next_generation"
-	var born_id: int = systems.simulation.add_rabbit(Vector2(60.0, 0.0), "birth")
-	systems.run_director.record_creature_fed("rabbit", born_id, -1)
-	systems.advance(0.3)
-	var too_young_blocked: bool = systems.run_director.current_milestone_id() == "next_generation"
-	systems.simulation.rabbits[born_id]["age"] = 1.1
-	systems.advance(0.3)
-	_expect(placed_blocked and too_young_blocked and systems.run_director.has_completed("next_generation"), "The Next Generation Takes Hold needs a born rabbit to survive and feed")
+	_advance_to(systems, "nursery_network")
+	_arrange_havens(systems, 12, 2)
+	systems.advance(0.6)
+	var two_groups_blocked: bool = systems.run_director.current_milestone_id() == "nursery_network"
+	_arrange_havens(systems, 12, 3)
+	systems.advance(0.6)
+	_expect(two_groups_blocked and systems.run_director.has_completed("nursery_network"), "A Nursery Network requires three simultaneous well-fed groups with at least three rabbits each")
 
 func _test_first_hunt_requires_successful_predation() -> void:
 	var systems = Systems.new(_fast_config())
@@ -219,31 +285,48 @@ func _test_first_hunt_requires_successful_predation() -> void:
 	systems.simulation.foxes[fox_id]["hunger"] = 60.0
 	systems.simulation.foxes[fox_id]["capture_progress"] = 0.99
 	systems.advance(0.5)
-	_expect(chase_blocked and systems.run_director.has_completed("first_hunt"), "First Hunt requires the simulation's successful predation event, not a chase")
+	var hunt_without_recovery_blocked: bool = systems.run_director.current_milestone_id() == "first_hunt" \
+		and systems.run_director.sequence_progress == 1
+	systems.simulation.add_rabbit(Vector2(70.0, 0.0), "birth")
+	systems.advance(0.3)
+	_expect(chase_blocked and hunt_without_recovery_blocked and systems.run_director.has_completed("first_hunt"), "Recovery After the Hunt requires a successful predation event followed by natural renewal")
 
 func _test_life_returns_requires_fresh_birth() -> void:
 	var systems = Systems.new(_fast_config())
 	_advance_to(systems, "life_returns")
-	_ensure_rabbits(systems, 8)
-	systems.advance(0.4)
-	var placements_blocked: bool = systems.run_director.current_milestone_id() == "life_returns"
+	_ensure_rabbits(systems, 9)
+	_ensure_foxes(systems, 1)
+	var fox_id: int = systems.simulation.foxes.keys()[0]
 	systems.simulation.add_rabbit(Vector2(70.0, 0.0), "birth")
+	var birth_out_of_order_blocked: bool = systems.run_director.sequence_progress == 0
+	systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[0], Vector2.ZERO)
+	systems.simulation.add_rabbit(Vector2(74.0, 0.0), "birth")
 	systems.advance(0.3)
-	_expect(placements_blocked and systems.run_director.has_completed("life_returns"), "Life Returns requires renewal after the hunt checkpoint")
+	var partial_cycle_blocked: bool = systems.run_director.current_milestone_id() == "life_returns" and systems.run_director.sequence_progress == 2
+	systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[1], Vector2.ZERO)
+	systems.advance(0.3)
+	_expect(birth_out_of_order_blocked and partial_cycle_blocked and systems.run_director.has_completed("life_returns"), "Predator–Prey Rhythm requires hunt, renewal, then another hunt in order")
 
 func _test_two_safe_havens_are_spatial_and_stable() -> void:
 	var config := _fast_config()
-	config["progression"]["milestones"][5]["stabilization"] = 0.5
+	config["progression"]["milestones"][7]["stabilization"] = 0.5
 	var systems = Systems.new(config)
 	_advance_to(systems, "two_safe_havens")
 	_ensure_rabbits(systems, 8)
+	_ensure_foxes(systems, 1)
+	var fox_id: int = systems.simulation.foxes.keys()[0]
+	systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[0], Vector2.ZERO)
+	systems.simulation.add_rabbit(Vector2(-210.0, 8.0), "birth")
 	var ids: Array = systems.simulation.rabbits.keys()
 	for index in range(ids.size()):
 		var rabbit: Dictionary = systems.simulation.rabbits[ids[index]]
 		rabbit["position"] = Vector2(-245.0 + float(index) * 70.0, 0.0)
 		rabbit["previous_position"] = rabbit["position"]
-	for x in [-210.0, -70.0, 70.0, 210.0]:
-		systems.simulation.add_plant("berry_bush", Vector2(x, 0.0))
+	for plant in systems.simulation.plants.values():
+		plant["food"] = 0.0
+		plant["depletion_latched"] = true
+	var shared_plant_id: int = systems.simulation.add_plant("berry_bush", Vector2.ZERO)
+	systems.simulation.plants[shared_plant_id]["food"] = 30.0
 	var stretched_rejected := not bool(systems.run_director.spatial_evidence(systems.simulation)["met"])
 	_arrange_two_havens(systems)
 	systems.advance(0.2)
@@ -255,55 +338,90 @@ func _test_two_safe_havens_are_spatial_and_stable() -> void:
 	systems.advance(0.4)
 	var short_hold_rejected: bool = systems.run_director.current_milestone_id() == "two_safe_havens"
 	systems.advance(0.2)
-	_expect(stretched_rejected and transient_rejected and short_hold_rejected and systems.run_director.has_completed("two_safe_havens"), "Two Safe Havens rejects a stretched colony and transient split, then accepts two separated fed groups")
+	_expect(stretched_rejected and transient_rejected and short_hold_rejected and systems.run_director.has_completed("two_safe_havens"), "Havens Under Pressure requires a hunt-renewal cycle plus two separated refuges that survive the hold", str({
+		"stretched_rejected": stretched_rejected,
+		"transient_rejected": transient_rejected,
+		"short_hold_rejected": short_hold_rejected,
+		"completed": systems.run_director.has_completed("two_safe_havens"),
+	}))
+
+func _test_local_nurseries_survive_unfed_rabbit_bridges() -> void:
+	var systems = Systems.new(_fast_config())
+	var sim = systems.simulation
+	for x in [-210.0, -194.0, -90.0, 30.0, 150.0, 194.0, 210.0]:
+		sim.add_rabbit(Vector2(x, 0.0))
+	for x in [-210.0, 210.0]:
+		var plant_id: int = sim.add_plant("berry_bush", Vector2(x, 10.0))
+		sim.plants[plant_id]["food"] = 30.0
+	var evidence: Dictionary = systems.run_director.spatial_evidence(sim, {
+		"target": 2,
+		"rabbits_per_group": 2,
+		"minimum_separation": 280.0,
+		"minimum_local_food": 12.0,
+	})
+	_expect(bool(evidence["met"]) and int(evidence["separated_group_count"]) == 2, "local nursery nuclei remain valid when unrelated unfed rabbits form a proximity chain", str(evidence))
+
+func _test_safe_haven_counter_supports_three_zones() -> void:
+	var systems = Systems.new(_fast_config())
+	var sim = systems.simulation
+	var centers := [Vector2(-250.0, -170.0), Vector2(250.0, -170.0), Vector2(-250.0, 170.0)]
+	for center in centers:
+		sim.add_rabbit(center + Vector2(-8.0, 0.0))
+		sim.add_rabbit(center + Vector2(8.0, 0.0))
+		var plant_id: int = sim.add_plant("berry_bush", center + Vector2(0.0, 10.0))
+		sim.plants[plant_id]["food"] = 30.0
+	var evidence: Dictionary = systems.run_director.spatial_evidence(sim, {
+		"target": 3,
+		"rabbits_per_group": 2,
+		"minimum_separation": 280.0,
+		"minimum_local_food": 12.0,
+	})
+	_expect(bool(evidence["met"]) and int(evidence["separated_group_count"]) == 3, "Safe Haven evidence can count three mutually separated local nursery zones", str(evidence))
 
 func _test_two_distinct_foxes_and_birth_are_required() -> void:
 	var systems = Systems.new(_fast_config())
 	_advance_to(systems, "predators_find_place")
-	_ensure_rabbits(systems, 7)
+	_arrange_havens(systems, 12, 3)
 	_ensure_foxes(systems, 2)
 	var fox_ids: Array = systems.simulation.foxes.keys()
-	for repeat in range(3):
-		systems.simulation.creature_fed.emit("fox", fox_ids[0], -1)
-	systems.simulation.add_rabbit(Vector2(80.0, 0.0), "birth")
+	systems.run_director.record_predation(fox_ids[0], systems.simulation.rabbits.keys()[0], Vector2.ZERO)
+	systems.simulation.add_rabbit(Vector2(-210.0, 8.0), "birth")
+	systems.run_director.record_predation(fox_ids[0], systems.simulation.rabbits.keys()[1], Vector2.ZERO)
 	systems.advance(0.3)
 	var one_fox_blocked: bool = systems.run_director.current_milestone_id() == "predators_find_place"
-	systems.simulation.creature_fed.emit("fox", fox_ids[1], -1)
+	systems.run_director.record_predation(fox_ids[1], systems.simulation.rabbits.keys()[2], Vector2.ZERO)
 	systems.advance(0.3)
-	_expect(one_fox_blocked and systems.run_director.has_completed("predators_find_place"), "Predators Find Their Place requires two distinct living foxes to feed plus rabbit renewal")
+	_expect(one_fox_blocked and systems.run_director.has_completed("predators_find_place"), "Predators Find Their Place requires two distinct hunters, a complete recovery rhythm, safe havens, and enough prey per fox")
 
 func _test_final_cycle_is_fresh_ordered_and_latched() -> void:
 	var config := _fast_config()
-	config["progression"]["milestones"][7]["stabilization"] = 0.6
-	config["progression"]["milestones"][7]["evidence_window"] = 0.2
+	config["progression"]["milestones"][9]["stabilization"] = 0.6
+	config["progression"]["milestones"][9]["evidence_window"] = 0.2
 	var systems = Systems.new(config)
 	_advance_to(systems, "predators_find_place")
-	_ensure_rabbits(systems, 9)
-	_ensure_foxes(systems, 2)
-	var fox_id: int = systems.simulation.foxes.keys()[0]
-	for event_type in ["birth", "hunt", "birth", "hunt"]:
-		if event_type == "birth":
-			systems.simulation.add_rabbit(Vector2(84.0, 0.0), "birth")
-		else:
-			systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[0], Vector2.ZERO)
 	_satisfy_current_checkpoint(systems)
 	var fresh_reset: bool = systems.run_director.current_milestone_id() == "living_ecosystem" and systems.run_director.sequence_progress == 0
-	systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[0], Vector2.ZERO)
-	systems.simulation.add_rabbit(Vector2(88.0, 0.0), "birth")
-	systems.advance(0.1)
+	_arrange_havens(systems, 14, 3)
+	_ensure_foxes(systems, 2)
+	var fox_ids: Array = systems.simulation.foxes.keys()
+	systems.simulation.add_rabbit(Vector2(-210.0, 8.0), "birth")
+	var birth_first_ignored: bool = systems.run_director.sequence_progress == 0
+	systems.run_director.record_predation(fox_ids[0], systems.simulation.rabbits.keys()[0], Vector2.ZERO)
+	systems.run_director.record_predation(fox_ids[0], systems.simulation.rabbits.keys()[1], Vector2.ZERO)
 	var wrong_order_blocked: bool = systems.run_director.sequence_progress == 1 and not systems.run_director.sequence_completed
-	systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[0], Vector2.ZERO)
-	systems.simulation.add_rabbit(Vector2(92.0, 0.0), "birth")
-	systems.run_director.record_predation(fox_id, systems.simulation.rabbits.keys()[1], Vector2.ZERO)
+	systems.simulation.add_rabbit(Vector2(-210.0, 8.0), "birth")
+	systems.run_director.record_predation(fox_ids[1], systems.simulation.rabbits.keys()[2], Vector2.ZERO)
+	systems.simulation.add_rabbit(Vector2(210.0, 8.0), "birth")
+	systems.run_director.record_predation(fox_ids[0], systems.simulation.rabbits.keys()[3], Vector2.ZERO)
 	systems.advance(0.3)
 	var latched_after_window: bool = systems.run_director.sequence_completed and systems.run_director.run_state == RunDirector.STATE_PLAYING
 	systems.advance(0.4)
-	_expect(fresh_reset and wrong_order_blocked and latched_after_window and systems.run_director.run_state == RunDirector.STATE_COMPLETED, "Living Ecosystem needs a fresh ordered cycle and latches it through the final hold")
+	_expect(fresh_reset and birth_first_ignored and wrong_order_blocked and latched_after_window and systems.run_director.run_state == RunDirector.STATE_COMPLETED, "Living Ecosystem needs a fresh hunt-first five-step cycle, distributed renewal, and latches the proof through the final hold")
 
 func _test_reward_timing_and_persistent_expansions() -> void:
 	var systems = Systems.new(_fast_config())
 	var preserved_plant: int = systems.simulation.add_plant("carrot_patch", Vector2(120.0, 0.0))
-	_advance_to(systems, "next_generation")
+	_advance_to(systems, "nursery_network")
 	var before_major: float = systems.simulation.world_radius
 	_satisfy_current_checkpoint(systems)
 	var first_major_ok: bool = systems.simulation.world_radius == before_major + 145.0 and systems.run_director.is_unlocked("fox") and systems.inventory["fox"] == 2 and systems.run_director.supply_pool == "web"
@@ -317,7 +435,7 @@ func _test_reward_timing_and_persistent_expansions() -> void:
 	var third_major_ok: bool = systems.simulation.world_radius == before_third + 145.0 and systems.run_director.supply_pool == "living"
 	var after: float = systems.simulation.world_radius
 	systems.advance(0.5)
-	_expect(first_major_ok and second_major_ok and third_major_ok and after == 795.0 and systems.simulation.world_radius == after and systems.simulation.plants.has(preserved_plant), "major rewards occur at checkpoints 3, 5, and 7 exactly once without resetting the world")
+	_expect(first_major_ok and second_major_ok and third_major_ok and after == 795.0 and systems.simulation.world_radius == after and systems.simulation.plants.has(preserved_plant), "major rewards occur at checkpoints 5, 7, and 9 exactly once without resetting the world")
 
 func _test_supply_pool_progression() -> void:
 	var config := Config.make()
@@ -330,15 +448,15 @@ func _test_supply_pool_progression() -> void:
 		living_plant_units += int(bundle["items"].get("carrot_patch", 0)) + int(bundle["items"].get("berry_bush", 0))
 	_expect(pools.size() == 3 and float(config["supply"]["interval"]) == 90.0 and living_rabbit_bundles == 1 and living_plant_units >= 8, "supplies stay on three pools and Living shifts toward plant support with fewer rabbit top-ups")
 
-func _test_critical_is_armed_only_after_next_generation() -> void:
+func _test_critical_is_armed_only_after_nursery_network() -> void:
 	var systems = Systems.new(_fast_config())
-	_advance_to(systems, "next_generation")
+	_advance_to(systems, "nursery_network")
 	_kill_all_rabbits(systems)
 	systems.advance(1.0)
 	var safe_before: bool = systems.run_director.run_state == RunDirector.STATE_PLAYING and not systems.run_director.rabbit_failure_armed
 	var second = Systems.new(_fast_config())
 	_advance_to(second, "first_hunt")
-	_expect(safe_before and second.run_director.rabbit_failure_armed, "Critical remains dormant until The Next Generation Takes Hold")
+	_expect(safe_before and second.run_director.rabbit_failure_armed, "Critical remains dormant until the Nursery Network is established")
 
 func _enter_critical(systems) -> void:
 	_advance_to(systems, "first_hunt")
@@ -439,34 +557,133 @@ func _test_first_recovery_supply_is_not_repeated() -> void:
 	systems.advance(0.3)
 	_expect(useful_first and systems.run_director.critical_episode_count == 2 and not systems.forced_recovery_supply and systems.supply_time_remaining > 90.0, "the first Critical gets one ordinary recovery supply and later episodes do not")
 
-func _visible_label_texts(node: Node, result: Array[String]) -> void:
-	if node is Label and node.is_visible_in_tree():
-		result.append(str(node.text))
-	for child in node.get_children():
-		_visible_label_texts(child, result)
-
-func _test_normal_ui_hides_internal_progression_mechanics() -> void:
+func _test_checkpoint_ui_uses_compact_live_progress() -> void:
 	var systems = Systems.new(_fast_config())
 	var hud = HUD.new()
 	root.add_child(hud)
 	hud.setup(systems)
 	hud.refresh()
-	var player_texts: Array[String] = [
+	var rabbit_row: Dictionary = hud.objective_progress_view.goal_rows["rabbit_population"]
+	var initial_population: String = rabbit_row["value"].text
+	systems.simulation.add_rabbit(Vector2.ZERO)
+	hud.refresh()
+	rabbit_row = hud.objective_progress_view.goal_rows["rabbit_population"]
+	var live_population: String = rabbit_row["value"].text
+	var joined := "\n".join([
 		hud.objective_eyebrow.text,
 		hud.objective_title.text,
 		hud.objective_body.text,
-		hud.objective_teaser.text,
-		hud.objective_coach_detail.text,
-	]
-	var joined := "\n".join(player_texts).to_lower()
-	var mechanics_hidden: bool = not hud.objective_requirements_heading.visible \
-		and not hud.objective_evidence_row.visible \
-		and not hud.objective_steps_box.visible \
-		and not hud.objective_trend_row.visible \
-		and not hud.objective_progress_row.visible
-	var qualitative: bool = "checkpoint 1 of 8" in joined and "ecosystem is still fragile" in joined and "next ·" in joined
-	var no_formulas: bool = " / " not in joined and "stability" not in joined and "evidence window" not in joined and "complete in order" not in joined
-	_expect(mechanics_hidden and qualitative and no_formulas, "normal UI uses qualitative checkpoint guidance and hides evaluator mechanics", joined)
+		hud.objective_progress_view.keep_heading.text,
+		hud.objective_progress_view.finish_heading.text,
+		rabbit_row["title"].text,
+		rabbit_row["value"].text,
+		hud.objective_progress_view.next_label.text,
+	]).to_lower()
+	var checklist_layout: bool = "checkpoint 1 of 10" in joined \
+		and "keep" in joined \
+		and "finish" in joined \
+		and "rabbits alive" in joined \
+		and "try this" in hud.objective_progress_view.next_heading.text.to_lower()
+	var animal_heuristic: bool = rabbit_row["glyph"] != null and rabbit_row["glyph"].kind == "rabbit"
+	var actual_progress: bool = initial_population == "0 / min 4" and live_population == "1 / min 4"
+	var compact: bool = is_equal_approx(hud.objective_panel.custom_minimum_size.x, 360.0)
+	var info_available: bool = hud.objective_progress_view.details_button.text == "Need a hint?" and not hud.objective_progress_view.details_box.visible
+	hud.objective_progress_view.details_button.pressed.emit()
+	var info_open: bool = hud.objective_progress_view.details_box.visible and hud.objective_progress_view.details_button.text == "Hide hint"
+	hud.objective_progress_view.details_button.pressed.emit()
+	var info_closed: bool = not hud.objective_progress_view.details_box.visible and hud.objective_progress_view.details_button.text == "Need a hint?"
+	_expect(checklist_layout and animal_heuristic and actual_progress and compact and info_available and info_open and info_closed, "checkpoint UI uses a compact task/status checklist with recognizable population art and optional nudges", joined)
+	hud.free()
+
+func _test_checkpoint_ui_maps_every_evidence_type() -> void:
+	var mapped := true
+	var observed: Array[String] = []
+	for index in range(Config.make()["progression"]["milestones"].size()):
+		var systems = Systems.new(_fast_config())
+		systems.run_director.milestone_index = index
+		var progress: Dictionary = systems.current_objective_progress()
+		var hud = HUD.new()
+		root.add_child(hud)
+		hud.setup(systems)
+		hud.refresh()
+		for configured_goal in progress["goals"]:
+			var goal: Dictionary = configured_goal
+			var goal_id := str(goal["id"])
+			if str(goal["type"]) == "ordered_cycle":
+				for step_index in range(progress["sequence"].size()):
+					var step_id := "%s_step_%d" % [goal_id, step_index]
+					mapped = mapped and hud.objective_progress_view.goal_rows.has(step_id)
+					if hud.objective_progress_view.goal_rows.has(step_id):
+						var step_row: Dictionary = hud.objective_progress_view.goal_rows[step_id]
+						mapped = mapped and step_row["title"].text in ["Fox kills a rabbit", "Rabbit is born"]
+						observed.append("%s %s" % [step_id, step_row["value"].text])
+				continue
+			var row_present: bool = hud.objective_progress_view.goal_rows.has(goal_id)
+			mapped = mapped and row_present
+			if row_present:
+				var row: Dictionary = hud.objective_progress_view.goal_rows[goal_id]
+				var expected_value := "%d / %d" % [int(goal["current"]), int(goal["target"])]
+				if str(goal["type"]) in ["rabbit_population", "fox_population", "prey_per_fox"]:
+					expected_value = "%d / min %d" % [int(goal["current"]), int(goal["target"])]
+				elif str(goal["type"]) == "health":
+					expected_value = {"fed": "Fed", "hungry": "Hungry", "starving": "Starving", "absent": "—"}.get(str(goal["status"]), "—")
+				elif str(goal["type"]) == "trend":
+					expected_value = "%d%% / max %d%%" % [int(goal["current"]), int(goal["target"])]
+				mapped = mapped and row["value"].text == expected_value
+				if str(goal["type"]) == "fox_population":
+					mapped = mapped and row["glyph"] != null and row["glyph"].kind == "fox"
+				observed.append("%s %s" % [goal_id, row["value"].text])
+		mapped = mapped and hud.objective_progress_view.goal_rows.has("hold")
+		hud.free()
+	_expect(mapped, "checkpoint UI maps every structured checkpoint goal into the task/status list", "; ".join(observed))
+
+func _test_checkpoint_ui_distinguishes_live_hunger_states() -> void:
+	var systems = Systems.new(_fast_config())
+	systems.run_director.milestone_index = 6
+	_ensure_rabbits(systems, 7)
+	_ensure_foxes(systems, 1)
+	var hud = HUD.new()
+	root.add_child(hud)
+	hud.setup(systems)
+	for rabbit in systems.simulation.rabbits.values():
+		rabbit["hunger"] = 0.0
+	for fox in systems.simulation.foxes.values():
+		fox["hunger"] = 0.0
+	hud.refresh()
+	var rabbit_row: Dictionary = hud.objective_progress_view.goal_rows["rabbit_health"]
+	var fox_row: Dictionary = hud.objective_progress_view.goal_rows["fox_health"]
+	var distinct_labels: bool = rabbit_row["title"].text == "Rabbit hunger" and fox_row["title"].text == "Fox hunger"
+	var fed_states: bool = rabbit_row["value"].text == "Fed" and fox_row["value"].text == "Fed"
+	var rabbit_id: int = systems.simulation.rabbits.keys()[0]
+	var fox_id: int = systems.simulation.foxes.keys()[0]
+	systems.simulation.rabbits[rabbit_id]["hunger"] = float(systems.config["rabbit"]["hunger_warning_at"]) + 1.0
+	systems.simulation.rabbits[rabbit_id]["behavior"] = "seek_food"
+	systems.simulation.foxes[fox_id]["hunger"] = float(systems.config["fox"]["starvation_threshold"]) + 1.0
+	systems.simulation.foxes[fox_id]["behavior"] = "hunt"
+	hud.refresh()
+	rabbit_row = hud.objective_progress_view.goal_rows["rabbit_health"]
+	fox_row = hud.objective_progress_view.goal_rows["fox_health"]
+	var live_states: bool = rabbit_row["value"].text == "Hungry" \
+		and rabbit_row["value"].theme_type_variation == "LabelWarning" \
+		and fox_row["value"].text == "Starving" \
+		and fox_row["value"].theme_type_variation == "LabelDanger"
+	var species_glyphs: bool = rabbit_row["glyph"].kind == "rabbit" and fox_row["glyph"].kind == "fox"
+	_expect(distinct_labels and fed_states and live_states and species_glyphs, "checkpoint UI gives rabbits and foxes distinct Fed, Hungry, and Starving signals")
+	hud.free()
+
+func _test_checkpoint_ui_uses_player_facing_guidance() -> void:
+	var systems = Systems.new(_fast_config())
+	systems.run_director.milestone_index = 4
+	_ensure_rabbits(systems, 12)
+	var hud = HUD.new()
+	root.add_child(hud)
+	hud.setup(systems)
+	hud.refresh()
+	hud.objective_progress_view.set_details_open(true)
+	var explanation: String = str(hud.objective_progress_view.details_detail.text).to_lower()
+	var is_player_facing: bool = "food" in explanation and "three" in explanation
+	var avoids_evaluator_language: bool = not "reachable" in explanation and not "minimum" in explanation and not "placing rabbits does not count" in explanation
+	_expect(is_player_facing and avoids_evaluator_language, "checkpoint guidance uses a short player-facing nudge instead of evaluator terminology", explanation)
 	hud.free()
 
 func _test_debug_retains_exact_evaluator_detail() -> void:
@@ -479,9 +696,9 @@ func _test_minor_and_major_feedback_are_distinct() -> void:
 	var hud = HUD.new()
 	root.add_child(hud)
 	hud.setup(systems)
-	hud._on_milestone_completed(0, "founders_forage", "Minor beat")
+	hud._on_milestone_completed(0, "colony_gathers", "Minor beat")
 	var minor_compact: bool = hud.toast_label.text == "Minor beat" and hud.toast_label.theme_type_variation == "BodyLarge" and not hud.ending_overlay.visible
-	hud._on_milestone_completed(2, "next_generation", "Major beat")
+	hud._on_milestone_completed(4, "nursery_network", "Major beat")
 	var major_emphasized: bool = hud.toast_label.text == "MEADOW MILESTONE · Major beat" and hud.toast_label.theme_type_variation == "HeadingThree" and not hud.ending_overlay.visible
 	_expect(minor_compact and major_emphasized, "minor checkpoints use compact feedback while major checkpoints receive stronger non-modal emphasis")
 	hud.free()
@@ -504,4 +721,4 @@ func _test_fresh_system_resets_the_run() -> void:
 	var completed = Systems.new(_fast_config())
 	_complete_run(completed)
 	var fresh = Systems.new(_fast_config())
-	_expect(fresh.run_director.run_state == RunDirector.STATE_PLAYING and fresh.run_director.current_milestone_id() == "founders_forage" and fresh.simulation.simulation_time == 0.0 and not fresh.run_director.is_unlocked("fox"), "a new ecosystem starts from clean V0.3 progression and simulation state")
+	_expect(fresh.run_director.run_state == RunDirector.STATE_PLAYING and fresh.run_director.current_milestone_id() == "colony_gathers" and fresh.simulation.simulation_time == 0.0 and not fresh.run_director.is_unlocked("fox"), "a new ecosystem starts from clean ten-checkpoint progression and simulation state")

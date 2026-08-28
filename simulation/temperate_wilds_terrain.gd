@@ -114,6 +114,24 @@ func food_suitability(plant_type: String, position: Vector2) -> float:
 		)
 	return 1.0
 
+func food_capacity_factor(plant_type: String, position: Vector2) -> float:
+	var suitability := food_suitability(plant_type, position)
+	var suitability_cfg: Dictionary = config.get("terrain", {}).get("food_suitability", {})
+	var minimum: float
+	var maximum: float
+	if plant_type == "carrot_patch":
+		minimum = float(suitability_cfg.get("carrot_minimum", 0.42))
+		maximum = float(suitability_cfg.get("carrot_maximum", 1.20))
+	else:
+		minimum = float(suitability_cfg.get("berry_minimum", 0.46))
+		maximum = float(suitability_cfg.get("berry_maximum", 1.24))
+	var quality := clampf(inverse_lerp(minimum, maximum, suitability), 0.0, 1.0)
+	return lerpf(
+		float(suitability_cfg.get("poor_capacity_factor", 0.48)),
+		float(suitability_cfg.get("rich_capacity_factor", 1.28)),
+		quality,
+	)
+
 func ground_speed_factor(kind: String, position: Vector2) -> float:
 	var cover := thicket_cover(position)
 	var terrain_cfg: Dictionary = config.get("terrain", {})
@@ -229,9 +247,12 @@ func route_between(start: Vector2, target: Vector2, world_radius: float, maximum
 		if not is_inside_world(center, world_radius, 4.0):
 			continue
 		var normal: Vector2 = ford["normal"]
-		var bank_distance: float = ford["half_width"] + 13.0
+		var bank_clearance: float = config.get("terrain", {}).get("routing", {}).get("bank_approach_clearance", 22.0)
+		var bank_distance: float = ford["half_width"] + bank_clearance
 		var start_approach := center + normal * float(start_side) * bank_distance
 		var target_approach := center + normal * float(target_side) * bank_distance
+		if not can_occupy_ground(start_approach, world_radius, 2.0) or not can_occupy_ground(target_approach, world_radius, 2.0):
+			continue
 		var waypoints: Array = []
 		var route_distance := INF
 		var valid := false
@@ -274,7 +295,23 @@ func nearest_reachable_thicket(position: Vector2, threat_position: Vector2, worl
 	var best_score := INF
 	var current_threat_distance := position.distance_to(threat_position)
 	for patch in thicket_patches:
-		var candidate: Vector2 = patch["center"]
+		var center: Vector2 = patch["center"]
+		# The geometric center made every fleeing Rabbit converge on one point and
+		# then oscillate around it once the route was complete. Aim for a spread of
+		# deep-cover points on the side away from the threat instead. Thicket still
+		# disrupts pursuit without becoming an invulnerable sanctuary.
+		var away := center - threat_position
+		if away.length_squared() < 0.01:
+			away = position - threat_position
+		if away.length_squared() < 0.01:
+			away = Vector2.RIGHT
+		away = away.normalized()
+		var tangent := Vector2(-away.y, away.x)
+		var radius := float(patch["radius"])
+		var lateral := clampf((position - center).dot(tangent) * 0.72, -radius * 0.28, radius * 0.28)
+		var candidate := center + away * radius * 0.50 + tangent * lateral
+		if not can_occupy_ground(candidate, world_radius, 4.0) or thicket_cover(candidate) < 0.5:
+			candidate = center
 		if not can_occupy_ground(candidate, world_radius, 4.0):
 			continue
 		if thicket_cover(candidate) < 0.5:
@@ -292,6 +329,27 @@ func nearest_reachable_thicket(position: Vector2, threat_position: Vector2, worl
 				"position": candidate,
 				"route": route,
 				"cover": thicket_cover(candidate),
+			}
+	return best
+
+func nearest_reachable_woodland(position: Vector2, world_radius: float, maximum_route: float) -> Dictionary:
+	var best: Dictionary = {}
+	var best_distance := INF
+	for patch in woodland_patches:
+		var candidate: Vector2 = patch["center"]
+		if position.distance_to(candidate) > maximum_route:
+			continue
+		if not can_occupy_ground(candidate, world_radius, 4.0):
+			continue
+		if woodland_cover(candidate) < 0.5:
+			continue
+		var route := route_between(position, candidate, world_radius, maximum_route)
+		if bool(route["reachable"]) and float(route["distance"]) < best_distance:
+			best_distance = route["distance"]
+			best = {
+				"position": candidate,
+				"route": route,
+				"cover": woodland_cover(candidate),
 			}
 	return best
 
@@ -346,13 +404,19 @@ func _generate_thicket() -> void:
 	var patch_rng := RandomNumberGenerator.new()
 	patch_rng.seed = seed_value + 19337
 	for index in range(count):
-		var angle := patch_rng.randf_range(0.0, TAU)
-		var distance: float
-		if index < 4:
-			distance = patch_rng.randf_range(initial_radius * 0.58, initial_radius * 0.88)
+		var center: Vector2
+		if index < 4 and stream_points.size() >= 2:
+			# Put the first readable refuge choices beside both Stream banks. This
+			# makes the food/cover/crossing tradeoff visible in the initial world
+			# without hard-scripting checkpoint-specific terrain.
+			var bank_amounts := [0.395, 0.445, 0.555, 0.605]
+			var frame := _stream_frame_at(float(bank_amounts[index]))
+			var side := -1.0 if index % 2 == 0 else 1.0
+			center = Vector2(frame["position"]) + Vector2(frame["normal"]) * side * (float(frame["half_width"]) + patch_rng.randf_range(58.0, 84.0))
 		else:
-			distance = lerpf(initial_radius * 0.72, maximum_radius * 0.91, sqrt(patch_rng.randf()))
-		var center := Vector2.from_angle(angle) * distance
+			var angle := patch_rng.randf_range(0.0, TAU)
+			var distance := lerpf(initial_radius * 0.72, maximum_radius * 0.91, sqrt(patch_rng.randf()))
+			center = Vector2.from_angle(angle) * distance
 		if is_deep_water(center):
 			center += water_escape_direction(center) * 70.0
 		thicket_patches.append(_make_patch(
@@ -407,6 +471,18 @@ func _generate_stream() -> void:
 			"radius": ford_radius,
 			"half_width": lerpf(stream_half_widths[index], stream_half_widths[index + 1], blend),
 		})
+
+func _stream_frame_at(amount: float) -> Dictionary:
+	var scaled := clampf(amount, 0.0, 1.0) * float(stream_points.size() - 1)
+	var index := mini(stream_points.size() - 2, floori(scaled))
+	var blend := scaled - float(index)
+	var tangent := (stream_points[index + 1] - stream_points[index]).normalized()
+	return {
+		"position": stream_points[index].lerp(stream_points[index + 1], blend),
+		"tangent": tangent,
+		"normal": Vector2(-tangent.y, tangent.x),
+		"half_width": lerpf(stream_half_widths[index], stream_half_widths[index + 1], blend),
+	}
 
 func _make_patch(center: Vector2, radius: float, squash: float, rotation: float, tone: float, kind: String) -> Dictionary:
 	return {

@@ -107,21 +107,28 @@ static func create() -> Theme:
 	_set_panel(theme, "SurfaceToastMajor", Color("#ffe59a"), RADIUS.panel, "success")
 	_set_panel(theme, "SurfaceDebug", Color(0.02, 0.06, 0.045, 0.94), RADIUS.control, "success")
 	_set_reward_surfaces(theme)
-	_set_objective_step_surfaces(theme)
+	_set_checkpoint_divider(theme)
 
 	_set_button(theme, "PrimaryButton", COLOR.forest, COLOR.text_on_dark, COLOR.forest.lightened(0.10), COLOR.forest_deep)
 	_set_button(theme, "SecondaryButton", Color("#e2e9d7"), COLOR.text_primary, COLOR.accent.lightened(0.25), COLOR.accent)
 	_set_button(theme, "QuietButton", Color(0.95, 0.91, 0.81, 0.82), COLOR.text_primary, COLOR.surface_elevated, COLOR.accent_soft)
 	_set_button(theme, "IconButton", Color(0.95, 0.91, 0.81, 0.82), COLOR.text_primary, COLOR.surface_elevated, COLOR.accent_soft)
 	theme.set_font_size("font_size", "IconButton", 21)
+	_set_button(theme, "CheckpointInfoButton", Color(0.18, 0.29, 0.23, 0.06), COLOR.text_secondary, Color(0.18, 0.29, 0.23, 0.11), COLOR.accent_soft)
+	theme.set_font_size("font_size", "CheckpointInfoButton", TYPE_SIZE.caption)
 	_set_button(theme, "CompactButton", Color("#28493c"), COLOR.text_on_dark, Color("#3c6852"), COLOR.accent)
 	_set_button(theme, "CompactButtonSelected", COLOR.accent, COLOR.forest_deep, COLOR.accent.lightened(0.14), COLOR.accent.darkened(0.08))
 	_set_inventory_button(theme, "InventoryButton", false)
 	_set_inventory_button(theme, "InventoryButtonSelected", true)
-	_set_reward_choice_button(theme)
+	_set_reward_choice_button(theme, "RewardChoiceButton", false)
+	_set_reward_choice_button(theme, "RewardChoiceButtonChosen", true)
 
 	_set_progress(theme, "ProgressAccent", Color(0.20, 0.31, 0.25, 0.13), COLOR.accent, 5)
 	_set_progress(theme, "ProgressInformation", Color(0.15, 0.34, 0.34, 0.14), COLOR.info, 4)
+	_set_progress(theme, "ProgressCheckpoint", Color(0.18, 0.29, 0.23, 0.10), COLOR.moss, 4)
+	_set_progress(theme, "ProgressCheckpointSuccess", Color(0.18, 0.29, 0.23, 0.10), COLOR.success, 4)
+	_set_progress(theme, "ProgressCheckpointWarning", Color(0.18, 0.29, 0.23, 0.10), COLOR.accent, 4)
+	_set_progress(theme, "ProgressCheckpointDanger", Color(0.18, 0.29, 0.23, 0.10), COLOR.danger, 4)
 	return theme
 
 static func _inventory_style(selected: bool, hovered: bool = false, unavailable: bool = false) -> StyleBoxFlat:
@@ -158,19 +165,13 @@ static func _reward_choice_style(state: String) -> StyleBoxFlat:
 	style.shadow_offset = Vector2(0.0, 5.0 if active else 3.0)
 	return style
 
-static func _objective_step_style(state: String) -> StyleBoxFlat:
-	var fill := Color(0.18, 0.29, 0.23, 0.045)
-	var border := Color(0.18, 0.29, 0.23, 0.10)
-	if state == "current":
-		fill = Color(COLOR.accent.r, COLOR.accent.g, COLOR.accent.b, 0.14)
-		border = Color(COLOR.accent.r, COLOR.accent.g, COLOR.accent.b, 0.55)
-	elif state == "complete":
-		fill = Color(COLOR.moss.r, COLOR.moss.g, COLOR.moss.b, 0.11)
-		border = Color(COLOR.moss.r, COLOR.moss.g, COLOR.moss.b, 0.34)
-	var style := _flat_style(fill, RADIUS.small)
-	_set_content_margins(style, 8, 5)
-	_set_border(style, border, 1)
-	style.border_width_left = 3 if state == "current" else 1
+static func _reward_choice_chosen_style() -> StyleBoxFlat:
+	var style := _flat_style(Color("#fff0b6"), RADIUS.card)
+	_set_border(style, COLOR.accent, 3)
+	style.border_width_bottom = 5
+	style.shadow_color = Color(COLOR.accent.r, COLOR.accent.g, COLOR.accent.b, 0.30)
+	style.shadow_size = 10
+	style.shadow_offset = Vector2(0.0, 5.0)
 	return style
 
 static func _set_text_style(theme: Theme, name: String, size: int, color: Color) -> void:
@@ -227,11 +228,15 @@ static func _set_inventory_button(theme: Theme, name: String, selected: bool) ->
 	theme.set_stylebox("focus", name, _focus_style(_inventory_style(selected, true)))
 	theme.set_stylebox("disabled", name, _inventory_style(selected, false, true))
 
-static func _set_reward_choice_button(theme: Theme) -> void:
-	var name := "RewardChoiceButton"
+static func _set_reward_choice_button(theme: Theme, name: String, chosen: bool) -> void:
 	theme.set_type_variation(name, "Button")
 	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_disabled_color"]:
 		theme.set_color(color_name, name, Color.TRANSPARENT)
+	if chosen:
+		var chosen_style := _reward_choice_chosen_style()
+		for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+			theme.set_stylebox(state, name, chosen_style)
+		return
 	theme.set_stylebox("normal", name, _reward_choice_style("normal"))
 	theme.set_stylebox("hover", name, _reward_choice_style("hover"))
 	theme.set_stylebox("pressed", name, _reward_choice_style("pressed"))
@@ -271,11 +276,12 @@ static func _set_reward_surfaces(theme: Theme) -> void:
 	peek.shadow_offset = Vector2(0.0, 5.0)
 	theme.set_stylebox("panel", "SurfacePeekHUD", peek)
 
-static func _set_objective_step_surfaces(theme: Theme) -> void:
-	for state in ["future", "current", "complete"]:
-		var variation := "ObjectiveStep%s" % state.capitalize()
-		theme.set_type_variation(variation, "PanelContainer")
-		theme.set_stylebox("panel", variation, _objective_step_style(state))
+static func _set_checkpoint_divider(theme: Theme) -> void:
+	theme.set_type_variation("CheckpointDivider", "HSeparator")
+	var line := _flat_style(COLOR.border_subtle, 0)
+	line.content_margin_top = 1
+	line.content_margin_bottom = 1
+	theme.set_stylebox("separator", "CheckpointDivider", line)
 
 static func _shortcut_badge_style() -> StyleBoxFlat:
 	var style := _flat_style(Color(COLOR.text_primary.r, COLOR.text_primary.g, COLOR.text_primary.b, 0.07), RADIUS.small)

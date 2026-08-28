@@ -34,7 +34,7 @@ func _init(p_config: Dictionary = {}) -> void:
 	inventory = config["inventory"].duplicate(true)
 	supply_time_remaining = float(config["supply"]["interval"])
 	rng.seed = int(config["simulation"]["seed"]) + 12003
-	simulation.entity_added.connect(run_director.record_entity_added)
+	simulation.entity_added.connect(_on_simulation_entity_added)
 	simulation.entity_removed.connect(run_director.record_entity_removed)
 	simulation.creature_fed.connect(run_director.record_creature_fed)
 	simulation.predation_succeeded.connect(run_director.record_predation)
@@ -46,6 +46,12 @@ func _init(p_config: Dictionary = {}) -> void:
 	run_director.first_recovery_supply_requested.connect(_on_first_recovery_supply_requested)
 	run_director.run_failed.connect(_on_director_run_failed)
 	run_director.run_completed.connect(_on_director_run_completed)
+
+func _on_simulation_entity_added(kind: String, entity_id: int, reason: String) -> void:
+	var position := Vector2.INF
+	if kind == "rabbit" and simulation.rabbits.has(entity_id):
+		position = simulation.rabbits[entity_id]["position"]
+	run_director.record_entity_added(kind, entity_id, reason, position)
 
 func set_speed(speed: float) -> void:
 	if supply_pending and speed > 0.0:

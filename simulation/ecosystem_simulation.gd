@@ -1,9 +1,18 @@
 class_name EcosystemSimulation
 extends RefCounted
 
+const FOX_WOODLAND_ROUTE_BASE := -2000000
+
+const PLANT_ABUNDANT := "abundant"
+const PLANT_HEALTHY := "healthy"
+const PLANT_SPARSE := "sparse"
+const PLANT_DEPLETED := "depleted"
+const PLANT_RECOVERING := "recovering"
+
 signal entity_added(kind: String, entity_id: int, reason: String)
 signal entity_removed(kind: String, entity_id: int, position: Vector2, cause: String)
 signal plant_eaten(plant_id: int, position: Vector2)
+signal plant_state_changed(plant_id: int, previous_state: String, new_state: String, position: Vector2)
 signal creature_fed(kind: String, entity_id: int, food_id: int)
 signal predation_succeeded(fox_id: int, rabbit_id: int, position: Vector2)
 
@@ -21,6 +30,8 @@ var forest_patches: Array = []
 var next_entity_id := 1
 var last_tick_stats := {"queries": 0, "captures": 0, "births": 0}
 var rabbit_food_target_claims: Dictionary = {}
+var rabbit_shared_food_vision: Dictionary = {}
+var rabbit_social_groups: Dictionary = {}
 
 func _init(p_config: Dictionary = {}, p_seed: int = -1) -> void:
 	config = p_config if not p_config.is_empty() else GameConfig.make()
@@ -38,6 +49,8 @@ func reset() -> void:
 	foxes.clear()
 	plants.clear()
 	rabbit_food_target_claims.clear()
+	rabbit_shared_food_vision.clear()
+	rabbit_social_groups.clear()
 	spatial.clear()
 	next_entity_id = 1
 	rng.seed = int(config["simulation"]["seed"])
@@ -89,7 +102,6 @@ func add_rabbit(position: Vector2, reason: String = "placement") -> int:
 		"caution_scale": rng.randf_range(1.0 - cfg["caution_variation"], 1.0 + cfg["caution_variation"]),
 		"habitat_bias": rng.randf_range(0.72, 1.28),
 		"habitat_phase": rng.randf_range(0.0, TAU),
-		"food_choice_phase": rng.randf_range(0.0, TAU),
 		"personal_space": rng.randf_range(cfg["personal_space_min"], cfg["personal_space_max"]),
 		"refuge_position": Vector2.INF,
 		"route_waypoints": [],
@@ -137,6 +149,8 @@ func add_fox(position: Vector2, reason: String = "placement") -> int:
 		"route_distance": 0.0,
 		"route_direct_distance": 0.0,
 		"route_replan_timer": 0.0,
+		"woodland_patrol_position": Vector2.INF,
+		"woodland_patrol_timer": 0.0,
 		"lifespan": cfg["lifespan"] * rng.randf_range(0.88, 1.14),
 		"created_at": simulation_time,
 		"reason": reason,
@@ -150,14 +164,22 @@ func add_plant(plant_type: String, position: Vector2, reason: String = "placemen
 	var cfg: Dictionary = config["plants"][plant_type]
 	var entity_id := _take_id()
 	var suitability := terrain.food_suitability(plant_type, position)
+	var base_max_food := float(cfg["max_food"])
+	var capacity_factor := terrain.food_capacity_factor(plant_type, position)
+	var effective_max_food := base_max_food * capacity_factor
 	plants[entity_id] = {
 		"id": entity_id,
 		"type": plant_type,
 		"position": position,
-		"food": float(cfg["max_food"]),
-		"max_food": float(cfg["max_food"]),
+		"food": effective_max_food,
+		"max_food": effective_max_food,
+		"base_max_food": base_max_food,
+		"habitat_capacity_factor": capacity_factor,
 		"regeneration": float(cfg["regeneration"]),
 		"habitat_suitability": suitability,
+		"ecology_state": PLANT_ABUNDANT,
+		"depletion_latched": false,
+		"state_changed_at": simulation_time,
 		"alive": true,
 		"created_at": simulation_time,
 		"reason": reason,
@@ -274,6 +296,7 @@ func step(delta: float) -> void:
 	last_tick_stats = {"queries": 0, "captures": 0, "births": 0}
 	_regenerate_plants(delta)
 	rebuild_spatial_index()
+	_rebuild_rabbit_shared_food_vision()
 	_rebuild_rabbit_food_target_claims()
 	var dead_rabbits: Array = []
 	var dead_foxes: Array = []
@@ -293,9 +316,56 @@ func step(delta: float) -> void:
 
 func _regenerate_plants(delta: float) -> void:
 	for plant in plants.values():
+		# Direct test/debug state changes and future loading can put biomass below
+		# the threshold without passing through _consume_plant.
+		_update_plant_ecology_state(plant)
 		var suitability: float = plant.get("habitat_suitability", terrain.food_suitability(plant["type"], plant["position"]))
 		plant["habitat_suitability"] = suitability
 		plant["food"] = minf(plant["max_food"], plant["food"] + plant["regeneration"] * suitability * delta)
+		_update_plant_ecology_state(plant)
+
+func plant_stock_ratio(plant: Dictionary) -> float:
+	return clampf(float(plant.get("food", 0.0)) / maxf(0.01, float(plant.get("max_food", 0.0))), 0.0, 1.0)
+
+func plant_ecology_state(plant: Dictionary) -> String:
+	return str(plant.get("ecology_state", _unlatched_plant_state(plant)))
+
+func plant_is_food_available(plant: Dictionary) -> bool:
+	if bool(plant.get("depletion_latched", false)):
+		return false
+	return float(plant.get("food", 0.0)) + 0.000001 >= float(config["rabbit"].get("minimum_food_bite", 0.45))
+
+func _update_plant_ecology_state(plant: Dictionary) -> void:
+	var cfg: Dictionary = config["plants"][plant["type"]]
+	var ratio := plant_stock_ratio(plant)
+	var depleted_ratio := float(cfg.get("depleted_ratio", 0.10))
+	var recovery_ratio := maxf(depleted_ratio, float(cfg.get("recovery_ratio", 0.35)))
+	var latched := bool(plant.get("depletion_latched", false))
+	if not latched and ratio <= depleted_ratio + 0.000001:
+		latched = true
+	elif latched and ratio + 0.000001 >= recovery_ratio:
+		latched = false
+	plant["depletion_latched"] = latched
+	var next_state: String
+	if latched:
+		next_state = PLANT_DEPLETED if ratio < depleted_ratio else PLANT_RECOVERING
+	else:
+		next_state = _unlatched_plant_state(plant)
+	var previous_state := str(plant.get("ecology_state", next_state))
+	if previous_state == next_state:
+		return
+	plant["ecology_state"] = next_state
+	plant["state_changed_at"] = simulation_time
+	plant_state_changed.emit(plant["id"], previous_state, next_state, plant["position"])
+
+func _unlatched_plant_state(plant: Dictionary) -> String:
+	var cfg: Dictionary = config["plants"][plant["type"]]
+	var ratio := plant_stock_ratio(plant)
+	if ratio >= float(cfg.get("abundant_ratio", 0.70)):
+		return PLANT_ABUNDANT
+	if ratio >= float(cfg.get("healthy_ratio", 0.35)):
+		return PLANT_HEALTHY
+	return PLANT_SPARSE
 
 func _rebuild_rabbit_food_target_claims() -> void:
 	rabbit_food_target_claims.clear()
@@ -303,6 +373,51 @@ func _rebuild_rabbit_food_target_claims() -> void:
 		var target_id: int = rabbit["target_id"]
 		if target_id != -1 and plants.has(target_id):
 			rabbit_food_target_claims[target_id] = int(rabbit_food_target_claims.get(target_id, 0)) + 1
+
+func _rebuild_rabbit_shared_food_vision() -> void:
+	rabbit_shared_food_vision.clear()
+	rabbit_social_groups.clear()
+	if rabbits.is_empty():
+		return
+	var local_vision: Dictionary = {}
+	for rabbit in rabbits.values():
+		var visible_food: Dictionary = {}
+		for entry in query_nearby("plant", rabbit["position"], float(config["rabbit"]["food_detection_radius"])):
+			if plants.has(entry["id"]) and plant_is_food_available(plants[entry["id"]]):
+				visible_food[entry["id"]] = true
+		local_vision[rabbit["id"]] = visible_food
+
+	var social_radius := float(config["rabbit"].get("social_proximity_radius", 0.0))
+	if social_radius <= 0.0:
+		for rabbit_id in local_vision:
+			rabbit_shared_food_vision[rabbit_id] = local_vision[rabbit_id]
+			rabbit_social_groups[rabbit_id] = [rabbit_id]
+		return
+
+	var visited: Dictionary = {}
+	for seed_rabbit in rabbits.values():
+		var seed_id: int = seed_rabbit["id"]
+		if visited.has(seed_id):
+			continue
+		var queue: Array[int] = [seed_id]
+		visited[seed_id] = true
+		var group: Array[int] = []
+		var shared_food: Dictionary = {}
+		while not queue.is_empty():
+			var current_id: int = queue.pop_front()
+			if not rabbits.has(current_id):
+				continue
+			group.append(current_id)
+			for food_id in local_vision[current_id]:
+				shared_food[food_id] = true
+			for entry in query_nearby("rabbit", rabbits[current_id]["position"], social_radius):
+				var neighbor_id: int = entry["id"]
+				if not visited.has(neighbor_id):
+					visited[neighbor_id] = true
+					queue.append(neighbor_id)
+		for member_id in group:
+			rabbit_shared_food_vision[member_id] = shared_food.duplicate()
+			rabbit_social_groups[member_id] = group.duplicate()
 
 func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 	var cfg: Dictionary = config["rabbit"]
@@ -320,21 +435,38 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 	var detection_radius: float = cfg["fox_detection_radius"] * caution_scale
 	var release_radius: float = cfg["flee_release_radius"] * caution_scale
 	var was_fleeing: bool = rabbit["behavior"] == "flee"
-	var threat := _best_reachable_threat(position, maxf(detection_radius, release_radius))
+	var thicket_cfg: Dictionary = config["terrain"]["thicket"]
+	var refuge_detection_radius := detection_radius * float(thicket_cfg.get("refuge_threat_detection_factor", 1.0))
+	var threat := _best_reachable_threat(position, maxf(release_radius, refuge_detection_radius))
 	var flee_radius := release_radius if rabbit["behavior"] == "flee" else detection_radius
-	if not threat.is_empty() and float(threat["route"]["distance"]) <= flee_radius:
-		rabbit["behavior"] = "flee"
-		_set_rabbit_target(rabbit, threat["id"])
-		var refuge_position: Vector2 = rabbit.get("refuge_position", Vector2.INF)
-		var needs_refuge := not was_fleeing or refuge_position == Vector2.INF \
-			or not is_position_valid(refuge_position) \
-			or terrain.thicket_cover(refuge_position) < float(config["terrain"]["thicket"]["refuge_cover_min"])
-		if needs_refuge:
-			var refuge := terrain.nearest_reachable_thicket(
+	var refuge_position: Vector2 = rabbit.get("refuge_position", Vector2.INF)
+	var prepared_refuge: Dictionary = {}
+	var should_flee := not threat.is_empty() and float(threat["route"]["distance"]) <= flee_radius
+	if not threat.is_empty() and not should_flee and float(threat["route"]["distance"]) <= refuge_detection_radius:
+		var retained_refuge := refuge_position != Vector2.INF and is_position_valid(refuge_position) \
+			and terrain.thicket_cover(refuge_position) >= float(thicket_cfg["refuge_cover_min"])
+		if retained_refuge:
+			should_flee = true
+		else:
+			prepared_refuge = terrain.nearest_reachable_thicket(
 				position,
 				threat["position"],
 				world_radius,
-				float(config["terrain"]["thicket"]["refuge_search_radius"]),
+				float(thicket_cfg["refuge_search_radius"]),
+			)
+			should_flee = not prepared_refuge.is_empty()
+	if should_flee:
+		rabbit["behavior"] = "flee"
+		_set_rabbit_target(rabbit, threat["id"])
+		var needs_refuge := not was_fleeing or refuge_position == Vector2.INF \
+			or not is_position_valid(refuge_position) \
+			or terrain.thicket_cover(refuge_position) < float(thicket_cfg["refuge_cover_min"])
+		if needs_refuge:
+			var refuge := prepared_refuge if not prepared_refuge.is_empty() else terrain.nearest_reachable_thicket(
+				position,
+				threat["position"],
+				world_radius,
+				float(thicket_cfg["refuge_search_radius"]),
 			)
 			if not refuge.is_empty():
 				rabbit["refuge_position"] = refuge["position"]
@@ -344,7 +476,17 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 				_clear_ground_route(rabbit)
 			refuge_position = rabbit["refuge_position"]
 		if refuge_position != Vector2.INF:
-			desired = _velocity_along_route(rabbit, refuge_position, -1000000 - int(threat["id"]), cfg["flee_speed"] * rabbit["speed_scale"], false)
+			var refuge_speed: float = cfg["flee_speed"] * rabbit["speed_scale"]
+			if terrain.thicket_cover(position) >= float(thicket_cfg["refuge_cover_min"]):
+				# Once inside, keep evading through deep cover. Routing forever to one
+				# exact refuge point made Rabbits bunch up and oscillate there, turning
+				# their sanctuary into an easier Fox target. Movement is careful rather
+				# than a full open-ground sprint, so successful hunts remain possible.
+				var cover_evasion_speed: float = cfg["move_speed"] * rabbit["speed_scale"] \
+					* float(thicket_cfg.get("refuge_evasion_speed_factor", 0.82))
+				desired = _rabbit_refuge_evasion_velocity(rabbit, threat["position"], cover_evasion_speed)
+			else:
+				desired = _velocity_along_route(rabbit, refuge_position, -1000000 - int(threat["id"]), refuge_speed, false)
 		if desired.length_squared() < 0.01:
 			var away: Vector2 = position - threat["position"]
 			if away.length_squared() < 0.01:
@@ -363,28 +505,35 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 			if rabbit["hunger"] >= hungry_at:
 				rabbit["food_motivated"] = true
 		var hungry: bool = rabbit["food_motivated"]
-		var target_valid := _rabbit_food_target_is_valid(rabbit, cfg["food_detection_radius"] * 1.2)
+		var target_valid := _rabbit_food_target_is_valid(rabbit)
 		var needs_decision: bool = rabbit["decision_timer"] <= 0.0
-		needs_decision = needs_decision or (hungry and rabbit["behavior"] == "wander")
+		needs_decision = needs_decision or (hungry and rabbit["behavior"] in ["wander", "forage"] and not target_valid)
 		needs_decision = needs_decision or (not hungry and rabbit["behavior"] != "wander")
 		needs_decision = needs_decision or (rabbit["behavior"] in ["seek_food", "eat"] and not target_valid)
 		if needs_decision:
 			rabbit["decision_timer"] = rabbit["decision_interval"]
 			if hungry:
-				var food := _best_food_target(rabbit, cfg["food_detection_radius"])
-				if not food.is_empty():
-					rabbit["behavior"] = "seek_food"
-					_set_rabbit_target(rabbit, food["id"])
-					_set_ground_route(rabbit, food["position"], food["id"], food["route"])
-				else:
-					rabbit["behavior"] = "forage"
-					_set_rabbit_target(rabbit, -1)
-					_clear_ground_route(rabbit)
+				if not target_valid:
+					var food := _best_food_target(rabbit, rabbit_shared_food_vision.get(rabbit["id"], {}))
+					if not food.is_empty():
+						var previous_target_id: int = rabbit["target_id"]
+						rabbit["behavior"] = "seek_food"
+						_set_rabbit_target(rabbit, food["id"])
+						# Food patches and terrain are static. Preserve progress through an
+						# existing route when a decision tick keeps the same target; rebuilding
+						# it can restore an already-reached bank waypoint and cause oscillation.
+						if previous_target_id != int(food["id"]) \
+							or int(rabbit.get("route_target_id", -1)) != int(food["id"]):
+							_set_ground_route(rabbit, food["position"], food["id"], food["route"])
+					else:
+						rabbit["behavior"] = "forage"
+						_set_rabbit_target(rabbit, -1)
+						_clear_ground_route(rabbit)
 			else:
 				rabbit["behavior"] = "wander"
 				_set_rabbit_target(rabbit, -1)
 				_clear_ground_route(rabbit)
-		target_valid = hungry and _rabbit_food_target_is_valid(rabbit, cfg["food_detection_radius"] * 1.2)
+		target_valid = hungry and _rabbit_food_target_is_valid(rabbit)
 		if target_valid:
 			var food: Dictionary = plants[rabbit["target_id"]]
 			rabbit["behavior"] = "seek_food"
@@ -398,10 +547,37 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 			desired = _rabbit_wander_velocity(rabbit, cfg["move_speed"], delta)
 	var separation_scale: float = 0.24 if rabbit["behavior"] == "flee" else cfg["separation_strength"]
 	desired += _rabbit_separation(rabbit) * cfg["move_speed"] * separation_scale
-	var habitat_strength: float = 0.12 if rabbit["behavior"] == "flee" else 0.32 * rabbit["habitat_bias"]
+	# Target routes should visually win over ambient habitat preference. Otherwise
+	# the weak Meadow bias can push a Rabbit back into a bank while it is trying
+	# to line up with a ford.
+	var habitat_strength: float = 0.06 if rabbit["behavior"] in ["flee", "seek_food", "eat", "forage"] else 0.32 * rabbit["habitat_bias"]
 	desired += _habitat_steering(position, false, rabbit["habitat_phase"]) * cfg["move_speed"] * habitat_strength
 	_move_entity(rabbit, desired, cfg["steering"] * rabbit["turn_scale"], delta)
 	return _update_mortality(rabbit, cfg, delta)
+
+func _rabbit_refuge_evasion_velocity(rabbit: Dictionary, threat_position: Vector2, speed: float) -> Vector2:
+	var position: Vector2 = rabbit["position"]
+	var away := position - threat_position
+	if away.length_squared() < 0.01:
+		away = Vector2.from_angle(float(rabbit["id"]) * 2.399)
+	away = away.normalized()
+	var best_direction := away
+	var best_score := -INF
+	var sample_distance := 19.0
+	for index in range(8):
+		var offset := (float(index) - 3.5) * PI / 7.0
+		var direction := away.rotated(offset)
+		var candidate := position + direction * sample_distance
+		if not is_position_valid(candidate):
+			continue
+		var cover := terrain.thicket_cover(candidate)
+		var threat_gain := candidate.distance_to(threat_position) - position.distance_to(threat_position)
+		var personal_spread := sin(float(rabbit["id"]) * 1.71 + float(index) * 2.13) * 0.7
+		var score := cover * 34.0 + threat_gain * 0.72 + direction.dot(away) * 3.0 + personal_spread
+		if score > best_score:
+			best_score = score
+			best_direction = direction
+	return best_direction * speed
 
 func _update_fox(fox: Dictionary, delta: float) -> bool:
 	var cfg: Dictionary = config["fox"]
@@ -412,6 +588,7 @@ func _update_fox(fox: Dictionary, delta: float) -> bool:
 	fox["recent_food"] = maxf(0.0, fox["recent_food"] - cfg["recent_food_decay"] * delta)
 	fox["reproduction_cooldown"] = maxf(0.0, fox["reproduction_cooldown"] - delta)
 	fox["route_replan_timer"] = maxf(0.0, float(fox.get("route_replan_timer", 0.0)) - delta)
+	fox["woodland_patrol_timer"] = maxf(0.0, float(fox.get("woodland_patrol_timer", 0.0)) - delta)
 	var position: Vector2 = fox["position"]
 	var prey: Dictionary = {}
 	if fox["target_id"] != -1 and rabbits.has(fox["target_id"]):
@@ -426,6 +603,7 @@ func _update_fox(fox: Dictionary, delta: float) -> bool:
 	var desired := Vector2.ZERO
 	if not prey.is_empty():
 		fox["behavior"] = "hunt"
+		fox["woodland_patrol_position"] = Vector2.INF
 		if fox["target_id"] != prey["id"]:
 			_set_ground_route(fox, prey["position"], prey["id"], prey["route"])
 		fox["target_id"] = prey["id"]
@@ -454,11 +632,46 @@ func _update_fox(fox: Dictionary, delta: float) -> bool:
 		fox["behavior"] = "wander"
 		fox["target_id"] = -1
 		fox["capture_progress"] = 0.0
-		_clear_ground_route(fox)
-		desired = _wander_velocity(fox, cfg["move_speed"], delta, true)
-	desired += _habitat_steering(position, true) * cfg["move_speed"] * (0.14 if fox["behavior"] == "hunt" else 0.42)
+		if int(fox.get("route_target_id", -1)) >= 0:
+			_clear_ground_route(fox)
+		desired = _fox_woodland_wander_velocity(fox, cfg, delta)
+	var woodland_strength := float(config["terrain"].get("woodland", {}).get("fox_wander_steering_strength", 0.62))
+	desired += _habitat_steering(position, true) * cfg["move_speed"] * (0.06 if fox["behavior"] == "hunt" else woodland_strength)
 	_move_entity(fox, desired, cfg["steering"], delta)
 	return _update_mortality(fox, cfg, delta)
+
+func _fox_woodland_wander_velocity(fox: Dictionary, cfg: Dictionary, delta: float) -> Vector2:
+	var wander := _wander_velocity(fox, cfg["move_speed"], delta, true)
+	var woodland_cfg: Dictionary = config["terrain"].get("woodland", {})
+	var cover_target := float(woodland_cfg.get("fox_patrol_cover_target", 0.58))
+	var current_cover := terrain.woodland_cover(fox["position"])
+	var patrol_position: Vector2 = fox.get("woodland_patrol_position", Vector2.INF)
+	var patrol_route_id := FOX_WOODLAND_ROUTE_BASE - int(fox["id"])
+	if current_cover >= cover_target:
+		fox["woodland_patrol_position"] = Vector2.INF
+		if int(fox.get("route_target_id", -1)) == patrol_route_id:
+			_clear_ground_route(fox)
+		return wander
+	if float(fox.get("woodland_patrol_timer", 0.0)) <= 0.0 or patrol_position == Vector2.INF \
+		or not is_position_valid(patrol_position):
+		fox["woodland_patrol_timer"] = float(woodland_cfg.get("fox_patrol_replan_interval", 4.5)) * rng.randf_range(0.82, 1.18)
+		var patrol := terrain.nearest_reachable_woodland(
+			fox["position"],
+			world_radius,
+			float(woodland_cfg.get("fox_patrol_search_radius", 420.0)),
+		)
+		if patrol.is_empty():
+			fox["woodland_patrol_position"] = Vector2.INF
+			if int(fox.get("route_target_id", -1)) == patrol_route_id:
+				_clear_ground_route(fox)
+			return wander
+		patrol_position = patrol["position"]
+		fox["woodland_patrol_position"] = patrol_position
+		_set_ground_route(fox, patrol_position, patrol_route_id, patrol["route"])
+	var routed := _velocity_along_route(fox, patrol_position, patrol_route_id, cfg["move_speed"], false)
+	if routed.length_squared() <= 0.01:
+		return wander
+	return (wander * 0.24 + routed * 0.92).limit_length(float(cfg["move_speed"]))
 
 func _wander_velocity(entity: Dictionary, speed: float, delta: float, prefers_forest: bool) -> Vector2:
 	entity["wander_timer"] -= delta
@@ -539,20 +752,20 @@ func _move_entity(entity: Dictionary, desired: Vector2, steering: float, delta: 
 	entity["velocity"] = velocity
 	entity["position"] = next_position
 
-func _rabbit_food_target_is_valid(rabbit: Dictionary, radius: float) -> bool:
+func _rabbit_food_target_is_valid(rabbit: Dictionary) -> bool:
 	var target_id: int = rabbit["target_id"]
 	if target_id == -1 or not plants.has(target_id):
 		return false
 	var plant: Dictionary = plants[target_id]
-	if plant["food"] <= 0.15 or rabbit["position"].distance_to(plant["position"]) > radius:
+	if not plant_is_food_available(plant):
 		return false
 	# Plants and terrain do not move. Once a reachable route is selected, its
 	# cached distance remains sufficient for target retention; the waypoint
 	# follower handles progress without sampling the Stream twice every tick.
 	if int(rabbit.get("route_target_id", -1)) == target_id \
 		and Vector2(rabbit.get("route_target_position", Vector2.INF)).is_equal_approx(plant["position"]):
-		return float(rabbit.get("route_distance", INF)) <= radius
-	return ground_route_distance(rabbit["position"], plant["position"], radius) <= radius
+		return is_finite(float(rabbit.get("route_distance", INF)))
+	return bool(ground_route(rabbit["position"], plant["position"]).get("reachable", false))
 
 func _set_rabbit_target(rabbit: Dictionary, target_id: int) -> void:
 	var previous_id: int = rabbit["target_id"]
@@ -656,32 +869,31 @@ func _rabbit_separation(rabbit: Dictionary) -> Vector2:
 		steering += away * weight * weight
 	return steering.normalized() if steering.length_squared() > 1.0 else steering
 
-func _best_food_target(rabbit: Dictionary, radius: float) -> Dictionary:
+func _best_food_target(rabbit: Dictionary, visible_food: Dictionary) -> Dictionary:
 	var position: Vector2 = rabbit["position"]
 	var cfg: Dictionary = config["rabbit"]
 	var best: Dictionary = {}
 	var best_score := INF
-	for entry in query_nearby("plant", position, radius):
-		if not plants.has(entry["id"]):
+	for food_id in visible_food:
+		if not plants.has(food_id):
 			continue
-		var plant: Dictionary = plants[entry["id"]]
-		if plant["food"] <= 0.15:
+		var plant: Dictionary = plants[food_id]
+		if not plant_is_food_available(plant):
 			continue
-		var route := ground_route(position, plant["position"], radius)
+		var route := ground_route(position, plant["position"])
 		if not bool(route["reachable"]):
 			continue
-		var attraction: float = config["plants"][plant["type"]]["attraction"]
 		var claims: int = rabbit_food_target_claims.get(plant["id"], 0)
 		if rabbit["target_id"] == plant["id"]:
 			claims = maxi(0, claims - 1)
-		var personal_bias: float = sin(float(rabbit["id"]) * 12.9898 + float(plant["id"]) * 78.233 + float(rabbit["food_choice_phase"])) * float(cfg["food_choice_variation"])
-		var score: float = float(route["distance"]) / attraction + float(claims) * float(cfg["food_crowding_penalty"]) + personal_bias
-		if rabbit["target_id"] == plant["id"]:
-			score -= cfg["target_commitment_bonus"]
+		# Food choice is intentionally legible: nearest reachable usable patch wins,
+		# with only a small crowding cost to keep a whole colony from piling onto one.
+		var score: float = float(route["distance"]) + float(claims) * float(cfg["food_crowding_penalty"])
 		if score < best_score:
 			best_score = score
-			best = {"id": entry["id"], "position": plant["position"], "route": route}
+			best = {"id": plant["id"], "position": plant["position"], "route": route}
 	return best
+
 
 func _consume_plant(rabbit: Dictionary, plant: Dictionary, delta: float) -> void:
 	var cfg: Dictionary = config["rabbit"]
@@ -689,6 +901,7 @@ func _consume_plant(rabbit: Dictionary, plant: Dictionary, delta: float) -> void
 	if amount <= 0.0:
 		return
 	plant["food"] -= amount
+	_update_plant_ecology_state(plant)
 	rabbit["hunger"] = maxf(0.0, rabbit["hunger"] - amount * cfg["food_value"])
 	rabbit["recent_food"] += amount * cfg["food_value"]
 	rabbit["behavior"] = "eat"
@@ -791,8 +1004,10 @@ func _fox_is_eligible(fox: Dictionary) -> bool:
 func _local_available_food(position: Vector2, radius: float) -> float:
 	var total := 0.0
 	for entry in query_nearby("plant", position, radius):
-		if plants.has(entry["id"]) and ground_route_distance(position, entry["position"], radius) <= radius:
-			total += float(plants[entry["id"]]["food"])
+		if plants.has(entry["id"]):
+			var plant: Dictionary = plants[entry["id"]]
+			if plant_is_food_available(plant) and ground_route_distance(position, entry["position"], radius) <= radius:
+				total += float(plant["food"])
 	return total
 
 func _nearby_valid_position(origin: Vector2, distance: float) -> Vector2:
@@ -826,8 +1041,16 @@ func debug_entity(kind: String, entity_id: int) -> Dictionary:
 	var entity: Dictionary = source[entity_id]
 	var nearby := {}
 	if kind == "rabbit":
+		var local_food := 0
+		for entry in query_nearby("plant", entity["position"], config["rabbit"]["food_detection_radius"]):
+			if plants.has(entry["id"]) and plant_is_food_available(plants[entry["id"]]):
+				local_food += 1
+		var shared_food: Dictionary = rabbit_shared_food_vision.get(entity_id, {})
+		var social_group: Array = rabbit_social_groups.get(entity_id, [entity_id])
 		nearby = {
-			"food": query_nearby("plant", entity["position"], config["rabbit"]["food_detection_radius"]).size(),
+			"food": local_food,
+			"shared_food": shared_food.size(),
+			"social_group": social_group.size(),
 			"predators": query_nearby("fox", entity["position"], config["rabbit"]["fox_detection_radius"]).size(),
 		}
 	else:

@@ -11,10 +11,13 @@ func _initialize() -> void:
 func _process(_delta: float) -> bool:
 	frames += 1
 	if frames == 2:
-		game.systems.place_item("berry_bush", Vector2(-35.0, 10.0))
-		game.systems.place_item("carrot_patch", Vector2(35.0, 22.0))
-		game.systems.place_item("rabbit", Vector2(-10.0, 0.0))
-		game.systems.place_item("rabbit", Vector2(12.0, 4.0))
+		# The seeded Stream can move through earlier fixed smoke-test coordinates.
+		# Resolve nearby playable points so this remains a renderer/HUD smoke test;
+		# placement rejection itself is covered by terrain_runner.gd.
+		game.systems.place_item("berry_bush", _placeable_near("berry_bush", Vector2(-90.0, 70.0)))
+		game.systems.place_item("carrot_patch", _placeable_near("carrot_patch", Vector2(90.0, 70.0)))
+		game.systems.place_item("rabbit", _placeable_near("rabbit", Vector2(-45.0, -55.0)))
+		game.systems.place_item("rabbit", _placeable_near("rabbit", Vector2(45.0, -55.0)))
 		game.systems.simulation.add_fox(Vector2(70.0, -15.0))
 		game.debug_enabled = true
 		game.world_view.debug_enabled = true
@@ -30,3 +33,12 @@ func _process(_delta: float) -> bool:
 			printerr("Visual smoke failed to instantiate the playable scene.")
 			quit(1)
 	return false
+
+func _placeable_near(item: String, preferred: Vector2) -> Vector2:
+	for ring in range(8):
+		var radius := float(ring) * 18.0
+		for spoke in range(16):
+			var candidate := preferred + Vector2.from_angle(float(spoke) / 16.0 * TAU) * radius
+			if game.systems.can_place(item, candidate):
+				return candidate
+	return Vector2.INF
