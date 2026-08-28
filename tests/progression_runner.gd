@@ -14,6 +14,7 @@ func _initialize() -> void:
 	_test_young_foragers_require_born_rabbits_to_feed()
 	_test_birthplaces_require_three_separated_births()
 	_test_nursery_network_requires_three_live_groups()
+	_test_nursery_network_requires_food_presence_not_volume()
 	_test_first_hunt_requires_successful_predation()
 	_test_life_returns_requires_fresh_birth()
 	_test_two_safe_havens_are_spatial_and_stable()
@@ -34,7 +35,7 @@ func _initialize() -> void:
 	_test_checkpoint_ui_uses_compact_live_progress()
 	_test_checkpoint_ui_maps_every_evidence_type()
 	_test_checkpoint_ui_distinguishes_live_hunger_states()
-	_test_checkpoint_ui_uses_player_facing_guidance()
+	_test_checkpoint_ui_stays_scan_first()
 	_test_minor_and_major_feedback_are_distinct()
 	_test_debug_retains_exact_evaluator_detail()
 	_test_completion_ui_and_sandbox_epilogue()
@@ -247,12 +248,14 @@ func _test_birthplaces_require_three_separated_births() -> void:
 	var systems = Systems.new(_fast_config())
 	_advance_to(systems, "birthplaces")
 	_ensure_rabbits(systems, 10)
-	systems.simulation.add_rabbit(Vector2(-230.0, -140.0), "birth")
-	systems.simulation.add_rabbit(Vector2(-210.0, -140.0), "birth")
-	systems.simulation.add_rabbit(Vector2(230.0, -140.0), "birth")
+	# 130 units is still one local breeding area; 150 units is enough to begin
+	# another one under the gameplay-scale birthplace threshold.
+	systems.simulation.add_rabbit(Vector2(0.0, 0.0), "birth")
+	systems.simulation.add_rabbit(Vector2(130.0, 0.0), "birth")
+	systems.simulation.add_rabbit(Vector2(270.0, 0.0), "birth")
 	systems.advance(0.3)
 	var two_areas_blocked: bool = systems.run_director.current_milestone_id() == "birthplaces"
-	systems.simulation.add_rabbit(Vector2(240.0, 180.0), "birth")
+	systems.simulation.add_rabbit(Vector2(420.0, 0.0), "birth")
 	systems.advance(0.3)
 	_expect(two_areas_blocked and systems.run_director.has_completed("birthplaces"), "Life Across the Meadow requires fresh births in three genuinely separated areas")
 
@@ -266,7 +269,23 @@ func _test_nursery_network_requires_three_live_groups() -> void:
 	var two_groups_blocked: bool = systems.run_director.current_milestone_id() == "nursery_network"
 	_arrange_havens(systems, 12, 3)
 	systems.advance(0.6)
-	_expect(two_groups_blocked and systems.run_director.has_completed("nursery_network"), "A Nursery Network requires three simultaneous well-fed groups with at least three rabbits each")
+	_expect(two_groups_blocked and systems.run_director.has_completed("nursery_network"), "A Nursery Network requires three simultaneous nurseries with at least three rabbits each")
+
+func _test_nursery_network_requires_food_presence_not_volume() -> void:
+	var config := _fast_config()
+	var systems = Systems.new(config)
+	var sim = systems.simulation
+	for position in [Vector2(-8.0, 0.0), Vector2(8.0, 0.0), Vector2(0.0, 8.0)]:
+		sim.add_rabbit(position)
+	var plant_id: int = sim.add_plant("carrot_patch", Vector2(0.0, 14.0))
+	sim.plants[plant_id]["food"] = 0.45
+	var evidence: Dictionary = systems.run_director.spatial_evidence(sim, {
+		"target": 1,
+		"rabbits_per_group": 3,
+		"minimum_separation": 280.0,
+		"minimum_local_food": 0.0,
+	})
+	_expect(bool(evidence["met"]) and int(evidence["separated_group_count"]) == 1, "A nursery needs usable nearby food but not a minimum biomass volume", str(evidence))
 
 func _test_first_hunt_requires_successful_predation() -> void:
 	var systems = Systems.new(_fast_config())
@@ -573,26 +592,19 @@ func _test_checkpoint_ui_uses_compact_live_progress() -> void:
 		hud.objective_eyebrow.text,
 		hud.objective_title.text,
 		hud.objective_body.text,
-		hud.objective_progress_view.keep_heading.text,
-		hud.objective_progress_view.finish_heading.text,
 		rabbit_row["title"].text,
 		rabbit_row["value"].text,
-		hud.objective_progress_view.next_label.text,
 	]).to_lower()
-	var checklist_layout: bool = "checkpoint 1 of 10" in joined \
-		and "keep" in joined \
-		and "finish" in joined \
-		and "rabbits alive" in joined \
-		and "try this" in hud.objective_progress_view.next_heading.text.to_lower()
+	var checklist_layout: bool = "checkpoint 1 of 10" in joined and "rabbits alive" in joined
 	var animal_heuristic: bool = rabbit_row["glyph"] != null and rabbit_row["glyph"].kind == "rabbit"
-	var actual_progress: bool = initial_population == "0 / min 4" and live_population == "1 / min 4"
+	var actual_progress: bool = initial_population == "0/4 rabbits" and live_population == "1/4 rabbits"
 	var compact: bool = is_equal_approx(hud.objective_panel.custom_minimum_size.x, 360.0)
-	var info_available: bool = hud.objective_progress_view.details_button.text == "Need a hint?" and not hud.objective_progress_view.details_box.visible
-	hud.objective_progress_view.details_button.pressed.emit()
-	var info_open: bool = hud.objective_progress_view.details_box.visible and hud.objective_progress_view.details_button.text == "Hide hint"
-	hud.objective_progress_view.details_button.pressed.emit()
-	var info_closed: bool = not hud.objective_progress_view.details_box.visible and hud.objective_progress_view.details_button.text == "Need a hint?"
-	_expect(checklist_layout and animal_heuristic and actual_progress and compact and info_available and info_open and info_closed, "checkpoint UI uses a compact task/status checklist with recognizable population art and optional nudges", joined)
+	var no_extra_copy: bool = hud.objective_progress_view.get_child_count() == 8 \
+		and hud.objective_progress_view.rows_box.get_child_count() == 2 \
+		and rabbit_row["container"].get_child_count() == 3 \
+		and hud.objective_progress_view.details_button.visible \
+		and hud.objective_progress_view.next_heading.text == "TRY THIS"
+	_expect(checklist_layout and animal_heuristic and actual_progress and compact and no_extra_copy, "checkpoint UI uses compact one-line goal rows with recognizable population art", joined)
 	hud.free()
 
 func _test_checkpoint_ui_maps_every_evidence_type() -> void:
@@ -622,13 +634,23 @@ func _test_checkpoint_ui_maps_every_evidence_type() -> void:
 			mapped = mapped and row_present
 			if row_present:
 				var row: Dictionary = hud.objective_progress_view.goal_rows[goal_id]
-				var expected_value := "%d / %d" % [int(goal["current"]), int(goal["target"])]
-				if str(goal["type"]) in ["rabbit_population", "fox_population", "prey_per_fox"]:
-					expected_value = "%d / min %d" % [int(goal["current"]), int(goal["target"])]
-				elif str(goal["type"]) == "health":
+				var goal_type := str(goal["type"])
+				var unit: String = str({
+					"founders_fed": "rabbits",
+					"rabbit_birth": "births",
+					"born_rabbit_fed": "rabbits",
+					"safe_havens": "nurseries",
+					"separated_birth_zones": "areas",
+					"distinct_foxes_fed": "foxes",
+					"prey_per_fox": "rabbits/fox",
+					"rabbit_population": "rabbits",
+					"fox_population": "foxes",
+				}.get(goal_type, "goals"))
+				var expected_value := "%d/%d %s" % [int(goal["current"]), int(goal["target"]), unit]
+				if goal_type == "health":
 					expected_value = {"fed": "Fed", "hungry": "Hungry", "starving": "Starving", "absent": "—"}.get(str(goal["status"]), "—")
-				elif str(goal["type"]) == "trend":
-					expected_value = "%d%% / max %d%%" % [int(goal["current"]), int(goal["target"])]
+				elif goal_type == "trend":
+					expected_value = "%d/%d%% max" % [int(goal["current"]), int(goal["target"])]
 				mapped = mapped and row["value"].text == expected_value
 				if str(goal["type"]) == "fox_population":
 					mapped = mapped and row["glyph"] != null and row["glyph"].kind == "fox"
@@ -671,19 +693,25 @@ func _test_checkpoint_ui_distinguishes_live_hunger_states() -> void:
 	_expect(distinct_labels and fed_states and live_states and species_glyphs, "checkpoint UI gives rabbits and foxes distinct Fed, Hungry, and Starving signals")
 	hud.free()
 
-func _test_checkpoint_ui_uses_player_facing_guidance() -> void:
+func _test_checkpoint_ui_stays_scan_first() -> void:
 	var systems = Systems.new(_fast_config())
-	systems.run_director.milestone_index = 4
-	_ensure_rabbits(systems, 12)
 	var hud = HUD.new()
 	root.add_child(hud)
 	hud.setup(systems)
 	hud.refresh()
-	hud.objective_progress_view.set_details_open(true)
-	var explanation: String = str(hud.objective_progress_view.details_detail.text).to_lower()
-	var is_player_facing: bool = "food" in explanation and "three" in explanation
-	var avoids_evaluator_language: bool = not "reachable" in explanation and not "minimum" in explanation and not "placing rabbits does not count" in explanation
-	_expect(is_player_facing and avoids_evaluator_language, "checkpoint guidance uses a short player-facing nudge instead of evaluator terminology", explanation)
+	var rabbit_row: Dictionary = hud.objective_progress_view.goal_rows["rabbit_population"]
+	var row_value: String = rabbit_row["value"].text
+	var hint_available: bool = hud.objective_progress_view.details_button.visible \
+		and hud.objective_progress_view.details_button.text == "Need a hint?" \
+		and not hud.objective_progress_view.details_box.visible
+	var next_action_visible: bool = hud.objective_progress_view.next_heading.text == "TRY THIS" \
+		and not hud.objective_progress_view.next_label.text.is_empty()
+	var compact_value: bool = row_value == "0/4 rabbits" and not "min" in row_value and not "needed" in row_value
+	hud.objective_progress_view.details_button.pressed.emit()
+	var hint_open: bool = hud.objective_progress_view.details_box.visible and hud.objective_progress_view.details_button.text == "Hide hint"
+	hud.objective_progress_view.details_button.pressed.emit()
+	var hint_closed: bool = not hud.objective_progress_view.details_box.visible and hud.objective_progress_view.details_button.text == "Need a hint?"
+	_expect(hint_available and next_action_visible and compact_value and hint_open and hint_closed, "checkpoint UI keeps optional guidance beside compact goal rows", row_value)
 	hud.free()
 
 func _test_debug_retains_exact_evaluator_detail() -> void:

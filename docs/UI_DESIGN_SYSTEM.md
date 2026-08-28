@@ -12,7 +12,7 @@ The canonical UI layer is now:
 - `ui/components/hud_stat.gd`: icon plus prominent numeric value.
 - `ui/components/hud_status.gd`: category, primary status, and optional secondary status.
 - `ui/components/instruction_callout.gd`: optional stand-alone contextual callout; it is not nested inside the checkpoint shell.
-- `ui/components/checkpoint_progress.gd`: compact task/status checklist with population glyphs, hold progress, and a next-action footer.
+- `ui/components/checkpoint_progress.gd`: compact scan-first goal rows with population glyphs, optional hint details, and hold progress.
 - `ui/components/inventory_card.gd`: placement item with icon, title, quantity, selection, hover/focus, and unavailable states.
 - `ui/components/reward_choice_card.gd`: container-backed reward manifest with role, shortcut badge, and contents.
 - `ui/components/icon_text_button.gd`: container-backed button content for an icon and semantic label, used by the reward peek action.
@@ -100,9 +100,9 @@ Buttons define default, hover, pressed, focus, and disabled states centrally. Re
 
 ### Checkpoint information architecture
 
-The checkpoint shell separates three different kinds of work. `DO THIS` contains event evidence such as fox kills, rabbit births, and other constructive actions. Ordered cycles render as literal indexed steps—for example, `Fox kills a rabbit` followed by `Rabbit is born`—rather than a single abstract rhythm label. `KEEP` contains conditions that can regress, including minimum living populations, separate fed groups, species-specific hunger, rabbits per fox, and recent rabbit-loss limits. `FINISH` names the simultaneous hold directly and places the hold bar with it. One `TRY THIS` nudge gives only the next useful action.
+The checkpoint shell is intentionally scan-first. It keeps the checkpoint eyebrow, title, short summary, and one compact row per goal. Ordered cycles render as literal event rows—for example, `Fox kills a rabbit` and `Rabbit is born`—without adding another section. A concise `TRY THIS` next action is available below the rows, while `Need a hint?` opens optional explanatory detail for players who want more context. The hold bar remains as a quiet visual cue below the rows.
 
-Every rule that can stop checkpoint completion is player-facing. Minimums use `current / min target`, loss guards use `current% / max target%`, and Rabbit/Fox hunger have separate, color-coded `Fed`, `Hungry`, and `Starving` states with exact counts in their tooltips. Population and animal-specific rows retain the rabbit or fox glyph for fast recognition. Difficult checkpoints may expose `Need a hint?` for one short suggestion; F3 is reserved for raw identity, timing, and evaluator diagnostics rather than rules the player must guess.
+Every rule that can stop checkpoint completion is visible in the row itself. Quantitative rows use a compact current/target format with the unit at the end, such as `0/6 rabbits`, `1/2 foxes`, or `0/4 sec`. Maximum thresholds retain their meaning with a trailing `max`, such as `4/20% max`. Rabbit/Fox hunger remain short, color-coded `Fed`, `Hungry`, and `Starving` states, while tooltips and the optional hint can provide exact details when needed. Population and animal-specific rows retain the rabbit or fox glyph for fast recognition; F3 remains reserved for raw evaluator diagnostics.
 
 `GameHUD` renders the structured `goals` returned by `GameSystems.current_objective_progress()` and adds the final hold row. The progression layer remains the source of truth for task labels, targets, completion, and semantic warning state. Evidence includes:
 

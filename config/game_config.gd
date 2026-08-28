@@ -312,7 +312,10 @@ static func make() -> Dictionary:
 							"label": "Separated birthplaces",
 							"metric_label": "BIRTHPLACES",
 							"target": 3,
-							"minimum_separation": 240.0,
+							# Birth areas are local breeding neighborhoods, not large map regions.
+							# Keep this close to the scale of a rabbit's food reach so two
+							# nearby families can still register as distinct.
+							"minimum_separation": 140.0,
 						},
 					],
 					"stabilization": 8.0,
@@ -343,7 +346,9 @@ static func make() -> Dictionary:
 							"target": 3,
 							"rabbits_per_group": 3,
 							"minimum_separation": 280.0,
-							"minimum_local_food": 18.0,
+							# Nursery evidence needs reachable usable forage nearby, not a hidden
+							# biomass quota. Later refuge checkpoints keep their stronger reserve.
+							"minimum_local_food": 0.0,
 						},
 					],
 					"stabilization": 10.0,
@@ -352,7 +357,7 @@ static func make() -> Dictionary:
 						"evidence": "Building three lasting nurseries...",
 						"stabilizing": "The nursery network is holding...",
 					},
-					"guidance": "Keep three groups of at least three rabbits near strong, well-spaced food patches.",
+					"guidance": "Keep three nurseries of at least three rabbits near usable, well-spaced food patches.",
 					"teaser": "Tracks have appeared. Something else is watching the meadow.",
 					"completion_message": "Three nurseries are thriving · Foxes have arrived",
 					"effects": {
@@ -573,7 +578,7 @@ static func make() -> Dictionary:
 							"label": "Renewal across refuges",
 							"metric_label": "BIRTHPLACES",
 							"target": 2,
-							"minimum_separation": 220.0,
+							"minimum_separation": 140.0,
 						},
 						{
 							"id": "prey_reserve",

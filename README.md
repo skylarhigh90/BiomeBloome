@@ -39,7 +39,7 @@ The run unfolds through ten ecological checkpoints. The opening now teaches one 
 
 - The first five checkpoints ramp through rabbit populations of **4 → 6 → 8 → 10 → 12**.
 - **New Arrivals** requires two natural births, and **Young Foragers** then requires two meadow-born rabbits to mature and feed.
-- **Life Across the Meadow** requires fresh births in three separated areas. **A Nursery Network** follows by asking for three simultaneous, well-fed groups of at least three rabbits.
+- **Life Across the Meadow** requires fresh births in three separated areas. **A Nursery Network** follows by asking for three simultaneous nurseries of at least three rabbits near usable food.
 - Checkpoints 5, 7, and 9 are major meadow beats with expansion or staging rewards. Completing checkpoint 5 unlocks Foxes, introduces a pair, and switches to the Web supply pool. Only final success opens a modal.
 - Predator play ramps through **hunt → birth**, then **hunt → birth → hunt**. Extra events do not erase valid progress, but unfinished sequences expire.
 - **Havens Under Pressure** combines two separated, fed refuges with a fresh hunt-and-renewal cycle and a full 12-second healthy hold.

@@ -262,13 +262,17 @@ func spatial_evidence(simulation: EcosystemSimulation, requirements: Dictionary 
 		var available_food := 0.0
 		for plant_id in food_ids:
 			available_food += float(simulation.plants[plant_id]["food"])
-		if available_food >= food_needed:
-			viable.append({
-				"members": member_ids,
-				"center": seed_position,
-				"food": available_food,
-				"food_ids": food_ids.duplicate(),
-			})
+		# A zero biomass threshold means "has usable forage," not "food may be
+		# absent." Keep the explicit food-id check so a nearby rabbit cluster alone
+		# cannot become a nursery.
+		if food_ids.is_empty() or available_food < food_needed:
+			continue
+		viable.append({
+			"members": member_ids,
+			"center": seed_position,
+			"food": available_food,
+			"food_ids": food_ids.duplicate(),
+		})
 	var separation := float(haven_cfg.get("minimum_separation", 300.0))
 	var separated_groups := _select_separated_nursery_zones(viable, required_groups, separation, simulation)
 	last_safe_haven_groups = separated_groups

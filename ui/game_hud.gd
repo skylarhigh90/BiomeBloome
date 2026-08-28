@@ -609,7 +609,6 @@ func _refresh_objective() -> void:
 	var state: String = systems.run_director.run_state
 	if state == RunDirector.STATE_SANDBOX:
 		if displayed_objective_id != "sandbox":
-			displayed_objective_id = "sandbox"
 			objective_progress_view.set_details_open(false)
 		displayed_objective_id = "sandbox"
 		objective_eyebrow.text = "FIELD NOTES COMPLETE"
@@ -622,10 +621,9 @@ func _refresh_objective() -> void:
 			"kind": "leaf",
 			"state": "success",
 		}])
-		objective_progress_view.set_hint("")
 		objective_progress_view.set_hold_progress(1.0, "success", false)
-		objective_progress_view.set_next("Follow the patterns that interest you.", "Place, watch, and learn from the ecosystem without another checkpoint to complete.")
 		objective_progress_view.set_guidance("")
+		objective_progress_view.set_next("Follow the patterns that interest you.", "Place, watch, and learn from the ecosystem without another checkpoint to complete.")
 		_update_objective_layout("sandbox")
 		return
 	var objective := systems.current_objective()
@@ -649,15 +647,7 @@ func _refresh_objective() -> void:
 		var rabbit_count := int(progress["rabbit_count"])
 		objective_progress_view.set_goals([
 			_goal_row("population_rabbit", "Rabbits", rabbit_count, recovery_target, "rabbit", rabbit_count >= recovery_target, "danger"),
-			{
-				"id": "recovery",
-				"label": "Bring the colony back",
-				"value": "At risk",
-				"kind": "",
-				"state": "danger",
-			},
 		])
-		objective_progress_view.set_hint("")
 		objective_progress_view.set_hold_progress(0.0, "danger", false)
 		objective_progress_view.set_guidance(
 			"Bring food to the remaining rabbits and give them time to recover.",
@@ -665,7 +655,6 @@ func _refresh_objective() -> void:
 		)
 	else:
 		objective_progress_view.set_goals(_checkpoint_goals(objective, progress))
-		objective_progress_view.set_hint("")
 		var hold_target := maxf(0.001, float(progress["stability_target"]))
 		var hold_ratio := clampf(float(progress["stability_elapsed"]) / hold_target, 0.0, 1.0)
 		var hold_state := "success" if hold_ratio >= 1.0 else ("warning" if bool(progress["hold_active"]) else _checkpoint_semantic_state(state, phase))
@@ -675,25 +664,21 @@ func _refresh_objective() -> void:
 			str(objective.get("teaser", "Keep watching the web."))
 		)
 	objective_progress_view.set_next(str(coach["title"]), str(coach["detail"]))
-	_update_objective_layout("goals:%s:%s" % [objective_id, phase])
+	_update_objective_layout("goals:%s:%s" % [str(objective["id"]), phase])
 
 func _checkpoint_goals(_objective: Dictionary, progress: Dictionary) -> Array[Dictionary]:
-	var action_rows: Array[Dictionary] = []
-	var keep_rows: Array[Dictionary] = []
+	var rows: Array[Dictionary] = []
 	for configured_goal in progress.get("goals", []):
 		var goal: Dictionary = configured_goal
 		var goal_type := str(goal.get("type", ""))
 		var met := bool(goal.get("met", false))
 		if goal_type == "ordered_cycle":
-			action_rows.append_array(_ordered_cycle_rows(goal, progress))
+			rows.append_array(_ordered_cycle_rows(goal, progress))
 			continue
 		var title := _player_goal_label(goal)
-		var value := "%d / %d" % [int(goal.get("current", 0)), int(goal.get("target", 1))]
+		var value := "%d/%d %s" % [int(goal.get("current", 0)), int(goal.get("target", 1)), _goal_unit(goal_type)]
 		var state := "success" if met else str(goal.get("unmet_state", "warning"))
-		var marker_style := "check"
-		if goal_type in ["rabbit_population", "fox_population", "prey_per_fox"]:
-			value = "%d / min %d" % [int(goal.get("current", 0)), int(goal.get("target", 1))]
-		elif goal_type == "health":
+		if goal_type == "health":
 			var health_status := str(goal.get("status", "fed"))
 			value = {
 				"fed": "Fed",
@@ -707,37 +692,28 @@ func _checkpoint_goals(_objective: Dictionary, progress: Dictionary) -> Array[Di
 				"starving": "danger",
 				"absent": "normal",
 			}.get(health_status, "normal")
-			marker_style = "status"
 		elif goal_type == "trend":
-			value = "%d%% / max %d%%" % [int(goal.get("current", 0)), int(goal.get("target", 0))]
+			value = "%d/%d%% max" % [int(goal.get("current", 0)), int(goal.get("target", 0))]
 		var kind := str(goal.get("kind", ""))
-		var row := {
+		rows.append({
 			"id": str(goal.get("id", goal_type)),
 			"label": title,
 			"value": value,
 			"kind": kind,
 			"state": state,
-			"complete": met,
-			"marker_style": marker_style,
 			"tooltip": str(goal.get("tooltip", "")),
-			"section": "keep" if goal_type in ["rabbit_population", "fox_population", "health", "trend", "safe_havens", "prey_per_fox"] else "do_this",
-		}
-		if str(row["section"]) == "keep":
-			keep_rows.append(row)
-		else:
-			action_rows.append(row)
+		})
 
 	var hold_elapsed := float(progress["stability_elapsed"])
 	var hold_target := float(progress["stability_target"])
-	var finish_rows: Array[Dictionary] = [{
+	rows.append({
 		"id": "hold",
-		"label": "Hold all goals",
-		"value": "%s / %s" % [_format_short_time(hold_elapsed), _format_short_time(hold_target)],
-		"kind": "",
+		"label": "Hold",
+		"value": _format_hold_value(hold_elapsed, hold_target),
+			"kind": "",
 		"state": "success" if hold_elapsed + 0.0001 >= hold_target else ("warning" if bool(progress["hold_active"]) else "normal"),
-		"section": "finish",
-	}]
-	return action_rows + keep_rows + finish_rows
+	})
+	return rows
 
 func _ordered_cycle_rows(goal: Dictionary, progress: Dictionary) -> Array[Dictionary]:
 	var rows: Array[Dictionary] = []
@@ -754,9 +730,6 @@ func _ordered_cycle_rows(goal: Dictionary, progress: Dictionary) -> Array[Dictio
 			"value": "Done" if completed else ("Next" if is_next else "Waiting"),
 			"kind": "rabbit" if event_type == "birth" else "fox",
 			"state": "success" if completed else ("warning" if is_next else "normal"),
-			"complete": completed,
-			"marker_text": "✓" if completed else str(index + 1),
-			"section": "do_this",
 		})
 	return rows
 
@@ -764,10 +737,30 @@ func _goal_row(row_id: String, label_text: String, current: int, target: int, ki
 	return {
 		"id": row_id,
 		"label": label_text,
-		"value": "%d / %d" % [current, target],
+		"value": "%d/%d %s" % [current, target, "rabbits" if kind == "rabbit" else "foxes"],
 		"kind": kind,
 		"state": "success" if complete else incomplete_state,
 	}
+
+func _goal_unit(goal_type: String) -> String:
+	return {
+		"founders_fed": "rabbits",
+		"rabbit_birth": "births",
+		"born_rabbit_fed": "rabbits",
+		"safe_havens": "nurseries",
+		"separated_birth_zones": "areas",
+		"distinct_foxes_fed": "foxes",
+		"prey_per_fox": "rabbits/fox",
+		"rabbit_population": "rabbits",
+		"fox_population": "foxes",
+	}.get(goal_type, "goals")
+
+func _format_hold_value(elapsed: float, target: float) -> String:
+	var current_seconds := maxi(0, ceili(elapsed))
+	var target_seconds := maxi(0, ceili(target))
+	if target_seconds < 60:
+		return "%d/%d sec" % [current_seconds, target_seconds]
+	return "%s/%s sec" % [_format_short_time(elapsed), _format_short_time(target)]
 
 func _player_goal_label(goal: Dictionary) -> String:
 	var goal_type := str(goal.get("type", ""))
@@ -779,7 +772,7 @@ func _player_goal_label(goal: Dictionary) -> String:
 		"born_rabbit_fed":
 			return "Young fed + grown"
 		"safe_havens":
-			return "Separate fed groups"
+			return "Nurseries"
 		"separated_birth_zones":
 			return "Separate birth areas"
 		"distinct_foxes_fed":
@@ -810,7 +803,7 @@ func _checkpoint_guidance(objective: Dictionary, progress: Dictionary) -> String
 			if bool(criterion.get("met", false)):
 				continue
 			if str(criterion.get("type", "")) == "safe_havens":
-				return "Build three well-spaced food patches and keep at least three rabbits around each one. All three groups need to hold at the same time."
+				return "Build three well-spaced food patches and keep at least three rabbits around each one. All three nurseries need to hold at the same time."
 	if phase == "stabilizing":
 		return "The meadow is finding its balance. Keep changes gentle and let it settle."
 	return str(objective.get("guidance", ""))
@@ -851,7 +844,7 @@ func _checkpoint_action(default_action: Dictionary, progress: Dictionary) -> Dic
 			"safe_havens":
 				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
 				var group_size := int(criterion.get("rabbits_per_group", 2))
-				return {"title": "Build %d more fed rabbit %s." % [missing, "group" if missing == 1 else "groups"], "detail": "Each group needs at least %d rabbits near a healthy food patch, separated from the other groups." % group_size, "kind": "rabbit"}
+				return {"title": "Build %d more %s." % [missing, "nursery" if missing == 1 else "nurseries"], "detail": "Each nursery needs at least %d rabbits gathered around usable nearby food, separate from the other nurseries." % group_size, "kind": "rabbit"}
 			"separated_birth_zones":
 				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
 				return {"title": "Have births in %d more %s." % [missing, "area" if missing == 1 else "areas"], "detail": "Keep adult rabbits together near food in separate parts of the meadow.", "kind": "rabbit"}
@@ -901,7 +894,7 @@ func _qualitative_objective_coach(objective_id: String, phase: String, run_state
 		"birthplaces":
 			return {"title": "Spread new life across the meadow.", "detail": "Set up three well-spaced food patches with breeding rabbits nearby.", "kind": "rabbit"}
 		"nursery_network":
-			return {"title": "Build three lasting nurseries.", "detail": "Keep three groups of at least three rabbits near strong food patches.", "kind": "rabbit"}
+			return {"title": "Build three lasting nurseries.", "detail": "Keep three nurseries of at least three rabbits near usable food patches.", "kind": "rabbit"}
 		"first_hunt":
 			return {"title": "Let a fox kill 1 rabbit.", "detail": "Keep at least 6 rabbits alive, then wait for a rabbit birth.", "kind": "fox"}
 		"life_returns":
