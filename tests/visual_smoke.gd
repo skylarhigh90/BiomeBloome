@@ -12,17 +12,19 @@ func _process(_delta: float) -> bool:
 	frames += 1
 	if frames == 2:
 		game.systems.place_item("berry_bush", Vector2(-35.0, 10.0))
-		game.systems.place_item("grass", Vector2(35.0, 22.0))
+		game.systems.place_item("carrot_patch", Vector2(35.0, 22.0))
 		game.systems.place_item("rabbit", Vector2(-10.0, 0.0))
 		game.systems.place_item("rabbit", Vector2(12.0, 4.0))
-		game.systems.place_item("fox", Vector2(70.0, -15.0))
+		game.systems.simulation.add_fox(Vector2(70.0, -15.0))
 		game.debug_enabled = true
 		game.world_view.debug_enabled = true
 		game.world_view.queue_redraw()
+		game.systems.set_speed(2.0)
+		game.systems.supply_time_remaining = 0.1
 		populated = true
 	if frames >= 24:
-		if populated and game.systems.simulation.rabbits.size() == 2 and game.systems.simulation.foxes.size() == 1 and game.systems.simulation.plants.size() == 2:
-			print("Visual smoke passed: scene, HUD, camera, terrain, four placeable renderers, and debug drawing instantiated without runtime errors.")
+		if populated and game.systems.simulation.rabbits.size() == 2 and game.systems.simulation.foxes.size() == 1 and game.systems.simulation.plants.size() == 2 and game.systems.supply_pending and game.systems.is_paused() and game.hud.supply_overlay.visible:
+			print("Visual smoke passed: scene, HUD, terrain, renderers, and the auto-paused Meadow Mail reward instantiated without runtime errors.")
 			quit(0)
 		else:
 			printerr("Visual smoke failed to instantiate the playable scene.")

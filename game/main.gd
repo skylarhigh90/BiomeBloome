@@ -37,6 +37,7 @@ func _ready() -> void:
 	hud.speed_selected.connect(_on_speed_selected)
 	hud.supply_selected.connect(_on_supply_selected)
 	hud.restart_requested.connect(_on_restart_requested)
+	hud.continue_requested.connect(_on_continue_requested)
 	systems.world_expanded.connect(_on_world_expanded)
 
 	get_viewport().size_changed.connect(_on_viewport_size_changed)
@@ -53,7 +54,10 @@ func _process(delta: float) -> void:
 		_update_debug_panel()
 
 func _update_camera(delta: float) -> void:
-	var input_direction := Input.get_vector("pan_left", "pan_right", "pan_up", "pan_down")
+	var camera_input_enabled := not systems.supply_pending or hud.supply_peeking
+	if not camera_input_enabled:
+		dragging_camera = false
+	var input_direction := Input.get_vector("pan_left", "pan_right", "pan_up", "pan_down") if camera_input_enabled else Vector2.ZERO
 	if input_direction.length_squared() > 0.0:
 		camera.position += input_direction * 330.0 / camera.zoom.x * delta
 		camera_manual_cooldown = 4.0
@@ -81,6 +85,9 @@ func _on_viewport_size_changed() -> void:
 		camera_zoom_target = _fit_zoom_for_radius(systems.simulation.world_radius)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if systems.supply_pending:
+		_handle_supply_input(event)
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F3:
 			_toggle_debug()
@@ -122,7 +129,42 @@ func _unhandled_input(event: InputEvent) -> void:
 		camera_manual_cooldown = 7.0
 		get_viewport().set_input_as_handled()
 
+func _handle_supply_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode in [KEY_E, KEY_ESCAPE]:
+			hud.toggle_supply_peek()
+			get_viewport().set_input_as_handled()
+			return
+		if not hud.supply_peeking and event.keycode in [KEY_1, KEY_2]:
+			hud.choose_supply_shortcut(0 if event.keycode == KEY_1 else 1)
+			get_viewport().set_input_as_handled()
+			return
+	if not hud.supply_peeking:
+		dragging_camera = false
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseButton:
+		if event.button_index in [MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT]:
+			dragging_camera = event.pressed
+			get_viewport().set_input_as_handled()
+			return
+		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+			var factor := 1.12 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.12
+			camera_zoom_target = clampf(camera_zoom_target * factor, 0.42, 1.8)
+			camera_manual_cooldown = 7.0
+			get_viewport().set_input_as_handled()
+			return
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			get_viewport().set_input_as_handled()
+			return
+	if event is InputEventMouseMotion and dragging_camera:
+		camera.position -= event.relative / camera.zoom.x
+		camera_manual_cooldown = 7.0
+		get_viewport().set_input_as_handled()
+
 func _on_inventory_selected(item: String) -> void:
+	if systems.supply_pending:
+		return
 	if systems.selected_item == item:
 		systems.clear_selection()
 	else:
@@ -130,6 +172,8 @@ func _on_inventory_selected(item: String) -> void:
 	_update_placement_preview()
 
 func _on_speed_selected(speed: float) -> void:
+	if systems.supply_pending:
+		return
 	systems.set_speed(speed)
 	hud.refresh()
 
@@ -138,14 +182,20 @@ func _on_supply_selected(index: int) -> void:
 	hud.refresh()
 
 func _on_restart_requested() -> void:
+	if systems.supply_pending:
+		return
 	get_tree().reload_current_scene()
+
+func _on_continue_requested() -> void:
+	systems.continue_observing()
+	hud.refresh()
 
 func _update_placement_preview() -> void:
 	if systems == null or world_view == null:
 		return
 	var item := systems.selected_item
 	var position := get_global_mouse_position()
-	world_view.set_placement_preview(item, position, systems.can_place(item, position), not item.is_empty())
+	world_view.set_placement_preview(item, position, systems.can_place(item, position), not item.is_empty() and not systems.supply_pending)
 
 func _toggle_debug() -> void:
 	debug_enabled = not debug_enabled
@@ -180,6 +230,7 @@ func _update_debug_panel() -> void:
 		"Rabbits: %d   Foxes: %d   Plants: %d" % [sim.rabbits.size(), sim.foxes.size(), sim.plants.size()],
 		"Seed: %d   Sim time: %.1fs" % [config["simulation"]["seed"], sim.simulation_time],
 	]
+	lines.append_array(systems.run_director.debug_lines(systems.simulation))
 	if debug_selected_id != -1:
 		var data := sim.debug_entity(debug_selected_kind, debug_selected_id)
 		if data.is_empty():
@@ -189,4 +240,9 @@ func _update_debug_panel() -> void:
 			lines.append("%s #%d · %s" % [debug_selected_kind.capitalize(), data["id"], data["behavior"]])
 			lines.append("Hunger %.1f · Age %.1f · Cooldown %.1f" % [data["hunger"], data["age"], data["reproduction_cooldown"]])
 			lines.append("Target %s · Nearby %s" % [str(data["target_id"]), str(data["nearby"])])
+			var terrain_data: Dictionary = data["terrain"]
+			lines.append("Terrain M %.2f · W %.2f · T %.2f · Water %.2f" % [terrain_data["meadow"], terrain_data["woodland"], terrain_data["thicket"], terrain_data["water"]])
+			lines.append("Route %.1f direct %.1f · waypoints %d · ford %s" % [data["route_distance"], data["route_direct_distance"], data["route_waypoints"].size(), str(data["route_ford"])])
+			if data["refuge_position"] != Vector2.INF:
+				lines.append("Chosen refuge %s" % str(data["refuge_position"]))
 	hud.update_debug("\n".join(lines))

@@ -19,24 +19,31 @@ func _run_all() -> void:
 	_test_invalid_placement_consumes_nothing()
 	_test_population_is_actual_entities()
 	_test_rabbit_seeks_nearby_food()
+	_test_rabbit_finishes_meal_before_roaming()
 	_test_rabbit_cannot_eat_distant_food()
 	_test_rabbit_flees_nearby_fox()
 	_test_fox_targets_nearby_rabbit()
 	_test_hunt_removes_exact_prey()
 	_test_plant_loses_food_when_eaten()
 	_test_plant_regenerates()
+	_test_carrot_patch_retains_fast_low_capacity_role()
 	_test_rabbit_reproduction_creates_entity()
 	_test_rabbit_reproduction_requires_readiness()
 	_test_fox_reproduction_creates_entity()
 	_test_fox_reproduction_requires_readiness()
+	_test_hunger_summary_distinguishes_foraging_from_danger()
 	_test_starvation_kills_creatures()
 	_test_pause_stops_simulation_time()
 	_test_speed_multipliers()
-	_test_objective_stability_progresses_and_resets()
+	_test_objective_stability_starts_immediately_and_resets()
 	_test_objective_completion_preserves_world()
 	_test_supply_adds_inventory()
+	_test_supply_arrival_pauses_and_restores_speed()
 	_test_expansion_increases_world()
 	_test_seeded_behavior_is_reproducible()
+	_test_rabbit_traits_are_diverse()
+	_test_clustered_rabbits_diverge()
+	_test_rabbits_spread_across_similar_food_targets()
 	_test_spatial_hash_handles_prototype_scale()
 
 func _fresh_config() -> Dictionary:
@@ -91,17 +98,46 @@ func _test_population_is_actual_entities() -> void:
 func _test_rabbit_seeks_nearby_food() -> void:
 	var sim = Simulation.new(_fresh_config())
 	var rabbit_id: int = sim.add_rabbit(Vector2.ZERO)
-	sim.add_plant("grass", Vector2(55.0, 0.0))
+	sim.add_plant("carrot_patch", Vector2(55.0, 0.0))
 	sim.rabbits[rabbit_id]["hunger"] = 50.0
 	sim.step(0.1)
 	_expect(sim.rabbits[rabbit_id]["behavior"] == "seek_food" and sim.rabbits[rabbit_id]["target_id"] != -1, "rabbits seek nearby food")
+
+func _test_rabbit_finishes_meal_before_roaming() -> void:
+	var config := _fresh_config()
+	config["world"]["forest_patch_count"] = 0
+	var sim = Simulation.new(config, 4217)
+	var rabbit_id: int = sim.add_rabbit(Vector2.ZERO)
+	var plant_id: int = sim.add_plant("carrot_patch", Vector2.ZERO)
+	sim.rabbits[rabbit_id]["hunger"] = config["rabbit"]["hungry_at"] + 1.0
+	var food_before: float = sim.plants[plant_id]["food"]
+	var meal_ticks := 0
+	for tick in range(20):
+		sim.step(0.1)
+		if sim.rabbits[rabbit_id]["behavior"] == "eat":
+			meal_ticks += 1
+		if meal_ticks > 0 and not sim.rabbits[rabbit_id]["food_motivated"]:
+			break
+	var rabbit: Dictionary = sim.rabbits[rabbit_id]
+	var consumed: float = food_before - float(sim.plants[plant_id]["food"])
+	var finished_meal: bool = meal_ticks >= 4 and consumed >= 1.5 and rabbit["hunger"] <= config["rabbit"]["sated_at"]
+	sim.step(0.1)
+	var moved_on: bool = rabbit["behavior"] == "wander" and rabbit["target_id"] == -1 and not rabbit["food_motivated"]
+	var distance_when_hungry_again := 0.0
+	for tick in range(200):
+		sim.step(0.1)
+		if rabbit["food_motivated"]:
+			distance_when_hungry_again = rabbit["position"].distance_to(sim.plants[plant_id]["position"])
+			break
+	var explored_beyond_patch: bool = distance_when_hungry_again >= config["rabbit"]["food_detection_radius"] and rabbit["target_id"] != plant_id
+	_expect(finished_meal and moved_on and explored_beyond_patch, "rabbits finish a meal and roam beyond the patch", "%d eating ticks, %.2f food consumed, %.1f units away when hungry again" % [meal_ticks, consumed, distance_when_hungry_again])
 
 func _test_rabbit_cannot_eat_distant_food() -> void:
 	var config := _fresh_config()
 	config["rabbit"]["food_detection_radius"] = 90.0
 	var sim = Simulation.new(config)
 	var rabbit_id: int = sim.add_rabbit(Vector2.ZERO)
-	var plant_id: int = sim.add_plant("grass", Vector2(260.0, 0.0))
+	var plant_id: int = sim.add_plant("carrot_patch", Vector2(260.0, 0.0))
 	sim.rabbits[rabbit_id]["hunger"] = 60.0
 	var before: float = sim.plants[plant_id]["food"]
 	_step_many(sim, 1.0)
@@ -147,10 +183,20 @@ func _test_plant_loses_food_when_eaten() -> void:
 
 func _test_plant_regenerates() -> void:
 	var sim = Simulation.new(_fresh_config())
-	var plant_id: int = sim.add_plant("grass", Vector2.ZERO)
+	var plant_id: int = sim.add_plant("carrot_patch", Vector2.ZERO)
 	sim.plants[plant_id]["food"] = 0.0
 	sim.step(1.0)
 	_expect(sim.plants[plant_id]["food"] > 0.0 and sim.plants[plant_id]["food"] <= sim.plants[plant_id]["max_food"], "plant food regenerates")
+
+func _test_carrot_patch_retains_fast_low_capacity_role() -> void:
+	var plants: Dictionary = _fresh_config()["plants"]
+	var carrots: Dictionary = plants["carrot_patch"]
+	var berries: Dictionary = plants["berry_bush"]
+	_expect(
+		float(carrots["max_food"]) < float(berries["max_food"])
+		and float(carrots["regeneration"]) > float(berries["regeneration"]),
+		"carrot patches remain the fast-growing, low-capacity food",
+	)
 
 func _test_rabbit_reproduction_creates_entity() -> void:
 	var config := _fresh_config()
@@ -173,7 +219,7 @@ func _test_rabbit_reproduction_requires_readiness() -> void:
 	var sim = Simulation.new(_fresh_config())
 	var first: int = sim.add_rabbit(Vector2.ZERO)
 	var second: int = sim.add_rabbit(Vector2(10.0, 0.0))
-	sim.add_plant("grass", Vector2(4.0, 4.0))
+	sim.add_plant("carrot_patch", Vector2(4.0, 4.0))
 	_make_eligible_rabbit(sim, first)
 	_make_eligible_rabbit(sim, second)
 	sim.rabbits[first]["reproduction_cooldown"] = 12.0
@@ -202,6 +248,21 @@ func _test_fox_reproduction_requires_readiness() -> void:
 	sim.foxes[second]["recent_food"] = 0.0
 	sim.step(0.1)
 	_expect(sim.foxes.size() == 2, "fox reproduction is limited by feeding and cooldown conditions")
+
+func _test_hunger_summary_distinguishes_foraging_from_danger() -> void:
+	var config := _fresh_config()
+	var sim = Simulation.new(config)
+	var finding_food: int = sim.add_rabbit(Vector2.ZERO)
+	var without_food: int = sim.add_rabbit(Vector2(20.0, 0.0))
+	var starving: int = sim.add_rabbit(Vector2(40.0, 0.0))
+	sim.rabbits[finding_food]["hunger"] = config["rabbit"]["hunger_warning_at"] + 1.0
+	sim.rabbits[finding_food]["behavior"] = "seek_food"
+	sim.rabbits[without_food]["hunger"] = config["rabbit"]["hunger_warning_at"] + 2.0
+	sim.rabbits[without_food]["behavior"] = "forage"
+	sim.rabbits[starving]["hunger"] = config["rabbit"]["starvation_threshold"] + 1.0
+	sim.rabbits[starving]["behavior"] = "seek_food"
+	var summary: Dictionary = sim.hunger_summary("rabbit")
+	_expect(summary["state"] == "starving" and summary["warning_count"] == 3 and summary["unserved_count"] == 1 and summary["starving_count"] == 1, "hunger summary separates rabbits finding food from rabbits that need help")
 
 func _test_starvation_kills_creatures() -> void:
 	var config := _fresh_config()
@@ -237,54 +298,140 @@ func _test_speed_multipliers() -> void:
 	three.advance(1.0)
 	_expect(absf(two.simulation.simulation_time - 2.0) < 0.001 and absf(three.simulation.simulation_time - 3.0) < 0.001, "2× and 3× advance simulation proportionally")
 
-func _test_objective_stability_progresses_and_resets() -> void:
+func _test_objective_stability_starts_immediately_and_resets() -> void:
 	var config := _fresh_config()
-	config["objectives"] = [{"name": "Test", "targets": {"rabbit": 1}, "duration": 3.0}]
+	var milestone: Dictionary = config["progression"]["milestones"][0]
+	milestone["rabbit_min"] = 1
+	milestone["evidence_type"] = ""
+	milestone["stabilization"] = 3.0
 	var systems = Systems.new(config)
 	var rabbit_id: int = systems.simulation.add_rabbit(Vector2.ZERO)
 	systems.advance(0.5)
-	var progressed: bool = systems.objective_stability > 0.39
+	var progressed: bool = systems.run_director.milestone_stability > 0.39
 	systems.simulation.kill_rabbit(rabbit_id, "test")
 	systems.advance(0.1)
-	_expect(progressed and is_zero_approx(systems.objective_stability), "objective stability progresses and resets")
+	_expect(progressed and is_zero_approx(systems.run_director.milestone_stability), "milestone stability starts immediately and resets")
 
 func _test_objective_completion_preserves_world() -> void:
 	var config := _fresh_config()
-	config["objectives"] = [{"name": "Test", "targets": {"rabbit": 1}, "duration": 0.1}]
+	var milestone: Dictionary = config["progression"]["milestones"][0]
+	milestone["rabbit_min"] = 1
+	milestone["evidence_type"] = ""
+	milestone["stabilization"] = 0.1
 	var systems = Systems.new(config)
 	var rabbit_id: int = systems.simulation.add_rabbit(Vector2.ZERO)
-	var plant_id: int = systems.simulation.add_plant("grass", Vector2(40.0, 0.0))
+	var plant_id: int = systems.simulation.add_plant("carrot_patch", Vector2(40.0, 0.0))
 	systems.advance(0.1)
-	_expect(systems.ecosystem_established and systems.simulation.rabbits.has(rabbit_id) and systems.simulation.plants.has(plant_id), "objective completion preserves the world")
+	_expect(systems.run_director.completed_milestones.has("founders_forage") and systems.simulation.rabbits.has(rabbit_id) and systems.simulation.plants.has(plant_id), "milestone completion preserves the world")
 
 func _test_supply_adds_inventory() -> void:
 	var systems = Systems.new(_fresh_config())
-	var before: int = systems.inventory["grass"]
+	var before: int = systems.inventory["carrot_patch"]
 	systems.supply_pending = true
-	systems.supply_choices = [{"name": "Test", "items": {"grass": 3}}]
+	systems.supply_choices = [{"name": "Test", "items": {"carrot_patch": 3}}]
 	var chosen := systems.choose_supply(0)
-	_expect(chosen and systems.inventory["grass"] == before + 3 and not systems.supply_pending, "supply choices add configured inventory")
+	_expect(chosen and systems.inventory["carrot_patch"] == before + 3 and not systems.supply_pending, "supply choices add configured inventory")
+
+func _test_supply_arrival_pauses_and_restores_speed() -> void:
+	var config := _fresh_config()
+	config["simulation"]["max_steps_per_frame"] = 100
+	config["supply"]["interval"] = 0.2
+	var systems = Systems.new(config)
+	var announcement := {"paused": false}
+	systems.supply_ready.connect(func(_choices: Array) -> void:
+		announcement["paused"] = systems.is_paused()
+	)
+	systems.set_speed(2.0)
+	systems.advance(0.2)
+	var arrived_paused: bool = systems.supply_pending and systems.is_paused() and is_equal_approx(systems.supply_resume_speed, 2.0)
+	var frozen_time: float = systems.simulation.simulation_time
+	systems.set_speed(3.0)
+	systems.advance(2.0)
+	var stayed_frozen: bool = is_equal_approx(systems.simulation.simulation_time, frozen_time) and systems.is_paused()
+	var placement_blocked: bool = not systems.can_place("rabbit", Vector2.ZERO)
+	var claimed: bool = systems.choose_supply(0)
+	var duplicate_blocked: bool = not systems.choose_supply(0)
+	_expect(bool(announcement["paused"]) and arrived_paused and stayed_frozen and placement_blocked and claimed and duplicate_blocked and is_equal_approx(systems.simulation_speed, 2.0), "supply arrival freezes the meadow before announcing choices, blocks play, and restores the exact prior speed")
 
 func _test_expansion_increases_world() -> void:
 	var config := _fresh_config()
-	config["world"]["expansion_interval"] = 0.2
-	config["world"]["expansion_amount"] = 100.0
+	var milestone: Dictionary = config["progression"]["milestones"][0]
+	milestone["rabbit_min"] = 1
+	milestone["evidence_type"] = ""
+	milestone["stabilization"] = 0.1
+	milestone["effects"]["expand_world"] = 100.0
 	var systems = Systems.new(config)
 	var before: float = systems.simulation.world_radius
-	systems.advance(0.3)
-	_expect(systems.simulation.world_radius == before + 100.0, "map expansion increases playable area")
+	systems.simulation.add_rabbit(Vector2.ZERO)
+	systems.advance(0.1)
+	_expect(systems.simulation.world_radius == before + 100.0, "milestone expansion increases playable area")
 
 func _test_seeded_behavior_is_reproducible() -> void:
 	var first = Simulation.new(_fresh_config(), 9912)
 	var second = Simulation.new(_fresh_config(), 9912)
 	for sim in [first, second]:
 		var rabbit_id: int = sim.add_rabbit(Vector2(10.0, 12.0))
-		sim.add_plant("grass", Vector2(70.0, 15.0))
+		sim.add_plant("carrot_patch", Vector2(70.0, 15.0))
 		sim.rabbits[rabbit_id]["hunger"] = 50.0
 		_step_many(sim, 4.0)
 	var first_rabbit: Dictionary = first.rabbits.values()[0]
 	var second_rabbit: Dictionary = second.rabbits.values()[0]
 	_expect(first_rabbit["position"].is_equal_approx(second_rabbit["position"]) and is_equal_approx(first_rabbit["hunger"], second_rabbit["hunger"]), "fixed seeded behavior is reproducible")
+
+func _test_rabbit_traits_are_diverse() -> void:
+	var first = Simulation.new(_fresh_config(), 8821)
+	var second = Simulation.new(_fresh_config(), 8821)
+	var first_profiles: Array = []
+	var second_profiles: Array = []
+	var distinct_speeds: Dictionary = {}
+	for index in range(8):
+		for sim in [first, second]:
+			var rabbit_id: int = sim.add_rabbit(Vector2(float(index) * 2.0, 0.0))
+			var rabbit: Dictionary = sim.rabbits[rabbit_id]
+			var profile := Vector3(rabbit["speed_scale"], rabbit["turn_scale"], rabbit["decision_interval"])
+			if sim == first:
+				first_profiles.append(profile)
+				distinct_speeds[snappedf(rabbit["speed_scale"], 0.001)] = true
+			else:
+				second_profiles.append(profile)
+	_expect(first_profiles == second_profiles and distinct_speeds.size() >= 6, "rabbit individuality is diverse and seed-reproducible")
+
+func _test_clustered_rabbits_diverge() -> void:
+	var config := _fresh_config()
+	config["world"]["forest_patch_count"] = 0
+	config["rabbit"]["hunger_rate"] = 0.0
+	config["rabbit"]["hungry_at"] = 999.0
+	var sim = Simulation.new(config, 7712)
+	var first_id: int = sim.add_rabbit(Vector2.ZERO)
+	var second_id: int = sim.add_rabbit(Vector2.ZERO)
+	for rabbit_id in [first_id, second_id]:
+		var rabbit: Dictionary = sim.rabbits[rabbit_id]
+		rabbit["position"] = Vector2.ZERO
+		rabbit["previous_position"] = Vector2.ZERO
+		rabbit["velocity"] = Vector2.RIGHT * 12.0
+		rabbit["previous_velocity"] = rabbit["velocity"]
+		rabbit["wander_direction"] = Vector2.RIGHT
+	_step_many(sim, 2.5)
+	var distance: float = sim.rabbits[first_id]["position"].distance_to(sim.rabbits[second_id]["position"])
+	_expect(distance >= 8.0, "co-located rabbits develop separate trajectories", "%.2f units apart" % distance)
+
+func _test_rabbits_spread_across_similar_food_targets() -> void:
+	var config := _fresh_config()
+	config["world"]["forest_patch_count"] = 0
+	var sim = Simulation.new(config, 9814)
+	var left_plant: int = sim.add_plant("carrot_patch", Vector2(-72.0, 0.0))
+	var right_plant: int = sim.add_plant("carrot_patch", Vector2(72.0, 0.0))
+	var chosen: Dictionary = {}
+	for index in range(8):
+		var position := Vector2(0.0, float(index - 4) * 1.5)
+		var rabbit_id: int = sim.add_rabbit(position)
+		sim.rabbits[rabbit_id]["hunger"] = 50.0
+	sim.step(0.1)
+	for rabbit in sim.rabbits.values():
+		if rabbit["target_id"] in [left_plant, right_plant]:
+			chosen[rabbit["target_id"]] = int(chosen.get(rabbit["target_id"], 0)) + 1
+	var balanced: bool = chosen.size() == 2 and int(chosen[left_plant]) >= 2 and int(chosen[right_plant]) >= 2
+	_expect(balanced, "similar food targets attract different rabbits", str(chosen))
 
 func _test_spatial_hash_handles_prototype_scale() -> void:
 	var config := _fresh_config()
@@ -299,7 +446,7 @@ func _test_spatial_hash_handles_prototype_scale() -> void:
 		sim.add_fox(position)
 	for index in range(80):
 		var position := Vector2.from_angle(float(index) * 2.117) * (50.0 + float(index % 10) * 24.0)
-		sim.add_plant("grass" if index % 2 == 0 else "berry_bush", position)
+		sim.add_plant("carrot_patch" if index % 2 == 0 else "berry_bush", position)
 	var started := Time.get_ticks_msec()
 	for tick in range(10):
 		sim.step(0.1)

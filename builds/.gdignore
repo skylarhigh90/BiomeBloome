@@ -1,0 +1,1 @@
+# Keep generated export artifacts outside Godot's res:// import scan.
