@@ -1,6 +1,8 @@
 class_name GameConfig
 extends RefCounted
 
+const WORLD_EXPANSION_STEP := 48.0
+
 ## V0.5 compound progression plus the V0.4 terrain and balance values live here.
 static func make() -> Dictionary:
 	return {
@@ -112,7 +114,7 @@ static func make() -> Dictionary:
 		},
 		"world": {
 			"initial_radius": 360.0,
-			"expansion_amount": 145.0,
+			"expansion_amount": WORLD_EXPANSION_STEP,
 			"maximum_radius": 940.0,
 			"forest_patch_count": 27,
 			"forest_patch_min_radius": 95.0,
@@ -213,6 +215,8 @@ static func make() -> Dictionary:
 			"trend_sample_interval": 1.0,
 			"trend_history_duration": 35.0,
 			"spatial_sample_interval": 0.5,
+			# Retain this evaluator key for compatibility. Player-facing copy calls
+			# every qualifying rabbit group a nursery.
 			"safe_havens": {
 				"minimum_groups": 2,
 				"rabbits_per_group": 2,
@@ -237,7 +241,7 @@ static func make() -> Dictionary:
 					"guidance": "Place four rabbits near a patch of food so the colony starts with room to grow.",
 					"teaser": "Next, the colony will need to grow on its own.",
 					"completion_message": "A rabbit colony has gathered",
-					"effects": {},
+					"effects": {"expand_world": WORLD_EXPANSION_STEP},
 				},
 				{
 					"id": "new_arrivals",
@@ -265,7 +269,7 @@ static func make() -> Dictionary:
 					"guidance": "Keep adult rabbits together near good food and give them time to start families.",
 					"teaser": "The young will soon need to find food for themselves.",
 					"completion_message": "Two new rabbits were born",
-					"effects": {},
+					"effects": {"expand_world": WORLD_EXPANSION_STEP},
 				},
 				{
 					"id": "young_foragers",
@@ -295,7 +299,7 @@ static func make() -> Dictionary:
 					"guidance": "Keep the meadow-born rabbits near replenishing food while they grow.",
 					"teaser": "Next, new life must take hold across the meadow.",
 					"completion_message": "The young rabbits can forage",
-					"effects": {},
+					"effects": {"expand_world": WORLD_EXPANSION_STEP},
 				},
 				{
 					"id": "birthplaces",
@@ -327,7 +331,7 @@ static func make() -> Dictionary:
 					"guidance": "Build three well-spaced food patches and keep a breeding pair near each one.",
 					"teaser": "Those new families now need lasting homes.",
 					"completion_message": "New life has spread across the meadow",
-					"effects": {},
+					"effects": {"expand_world": WORLD_EXPANSION_STEP},
 				},
 				{
 					"id": "nursery_network",
@@ -343,11 +347,15 @@ static func make() -> Dictionary:
 							"type": "safe_havens",
 							"label": "Stable nursery groups",
 							"metric_label": "NURSERIES",
+							"lens_label": "Nursery",
+							# Three sites make the rabbit opening's strategic capstone. By this
+							# point four smaller checkpoint expansions have opened enough room,
+							# and the Objective Lens identifies each recognized live nursery.
 							"target": 3,
 							"rabbits_per_group": 3,
 							"minimum_separation": 280.0,
 							# Nursery evidence needs reachable usable forage nearby, not a hidden
-							# biomass quota. Later refuge checkpoints keep their stronger reserve.
+							# biomass quota. Later nursery checkpoints keep their stronger reserve.
 							"minimum_local_food": 0.0,
 						},
 					],
@@ -357,11 +365,11 @@ static func make() -> Dictionary:
 						"evidence": "Building three lasting nurseries...",
 						"stabilizing": "The nursery network is holding...",
 					},
-					"guidance": "Keep three nurseries of at least three rabbits near usable, well-spaced food patches.",
+					"guidance": "A nursery has at least three rabbits gathered around usable nearby food. Sustain three well-spaced nurseries at the same time.",
 					"teaser": "Tracks have appeared. Something else is watching the meadow.",
 					"completion_message": "Three nurseries are thriving · Foxes have arrived",
 					"effects": {
-						"expand_world": 145.0,
+						"expand_world": WORLD_EXPANSION_STEP,
 						"unlock": ["fox"],
 						"introduction": {"fox": 2},
 						"supply_pool": "web",
@@ -401,7 +409,7 @@ static func make() -> Dictionary:
 					"guidance": "Keep the rabbits fed after the hunt and give the meadow time to renew.",
 					"teaser": "The meadow is learning how to live with a hunter.",
 					"completion_message": "The colony recovered after the hunt",
-					"effects": {},
+					"effects": {"expand_world": WORLD_EXPANSION_STEP},
 				},
 				{
 					"id": "life_returns",
@@ -437,15 +445,15 @@ static func make() -> Dictionary:
 					"teaser": "The meadow will soon face pressure in more than one place.",
 					"completion_message": "The predator–prey rhythm holds · the meadow opens",
 					"effects": {
-						"expand_world": 145.0,
+						"expand_world": WORLD_EXPANSION_STEP,
 						"introduction": {"fox": 1},
 					},
 				},
 				{
 					"id": "two_safe_havens",
 					"tier": "minor",
-					"title": "Havens Under Pressure",
-					"summary": "Keep 2 separate fed rabbit groups through a fox kill, then a rabbit birth.",
+					"title": "Nurseries Under Pressure",
+					"summary": "Keep 2 separate nurseries fed through a fox kill, then a rabbit birth.",
 					"display_populations": ["rabbit", "fox"],
 					"rabbit_min": 8,
 					"fox_min": 1,
@@ -453,8 +461,9 @@ static func make() -> Dictionary:
 						{
 							"id": "safe_havens",
 							"type": "safe_havens",
-							"label": "Separated safe havens",
-							"metric_label": "SAFE HAVENS",
+							"label": "Separated nurseries",
+							"metric_label": "NURSERIES",
+							"lens_label": "Nursery",
 							"target": 2,
 						},
 						{
@@ -472,16 +481,16 @@ static func make() -> Dictionary:
 					"forbid_active_starvation": true,
 					"forbid_fox_starvation": true,
 					"labels": {
-						"low": "The refuge network is still fragile...",
-						"evidence": "Testing the havens under pressure...",
-						"starving": "One refuge needs reachable food...",
+						"low": "The nursery network is still fragile...",
+						"evidence": "Testing the nurseries under pressure...",
+						"starving": "One nursery needs reachable food...",
 						"declining": "The colony is losing ground...",
-						"stabilizing": "Both havens survived the cycle...",
+						"stabilizing": "Both nurseries survived the cycle...",
 					},
-					"guidance": "Feed two rabbit groups and let the foxes move through without emptying either one.",
+					"guidance": "Keep two nurseries fed and let the foxes move through without emptying either one.",
 					"teaser": "Two hunters are waiting to find their places.",
-					"completion_message": "The havens survived pressure",
-					"effects": {},
+					"completion_message": "The nurseries survived pressure",
+					"effects": {"expand_world": WORLD_EXPANSION_STEP},
 				},
 				{
 					"id": "predators_find_place",
@@ -495,8 +504,9 @@ static func make() -> Dictionary:
 						{
 							"id": "safe_havens",
 							"type": "safe_havens",
-							"label": "Separated safe havens",
-							"metric_label": "SAFE HAVENS",
+							"label": "Separated nurseries",
+							"metric_label": "NURSERIES",
+							"lens_label": "Nursery",
 							"target": 3,
 						},
 						{
@@ -538,7 +548,7 @@ static func make() -> Dictionary:
 					"teaser": "The whole meadow is about to find its own rhythm.",
 					"completion_message": "Predators have found their place · the meadow opens",
 					"effects": {
-						"expand_world": 145.0,
+						"expand_world": WORLD_EXPANSION_STEP,
 						"introduction": {"fox": 1},
 						"supply_pool": "living",
 					},
@@ -555,8 +565,9 @@ static func make() -> Dictionary:
 						{
 							"id": "safe_havens",
 							"type": "safe_havens",
-							"label": "Separated safe havens",
-							"metric_label": "SAFE HAVENS",
+							"label": "Separated nurseries",
+							"metric_label": "NURSERIES",
+							"lens_label": "Nursery",
 							"target": 3,
 						},
 						{
@@ -575,7 +586,7 @@ static func make() -> Dictionary:
 						{
 							"id": "distributed_renewal",
 							"type": "separated_birth_zones",
-							"label": "Renewal across refuges",
+							"label": "Renewal across nurseries",
 							"metric_label": "BIRTHPLACES",
 							"target": 2,
 							"minimum_separation": 140.0,

@@ -33,6 +33,7 @@ var milestone_fed_born_rabbit_ids: Dictionary = {}
 var milestone_fed_fox_ids: Dictionary = {}
 var milestone_born_rabbit_ids: Dictionary = {}
 var milestone_birth_positions: Array[Vector2] = []
+var milestone_evidence_revision := 0
 var placed_rabbit_ids: Dictionary = {}
 var born_rabbit_ids: Dictionary = {}
 var sequence_progress := 0
@@ -215,6 +216,119 @@ func milestone_progress(simulation: EcosystemSimulation) -> Dictionary:
 		"goals": goals,
 	}
 
+## Player-safe, semantic evidence for the in-world Objective Lens. The renderer
+## consumes this projection instead of inspecting director internals or
+## repeating criterion rules. Deliberately excluded: evaluator radii, timing
+## windows, and any suggested/optimal destination.
+func objective_lens_snapshot(simulation: EcosystemSimulation) -> Dictionary:
+	var milestone := current_milestone()
+	var snapshot := {
+		"objective_id": current_milestone_id(),
+		"evidence_revision": milestone_evidence_revision,
+		"active": run_state == STATE_PLAYING and not milestone.is_empty(),
+		"attention": [],
+		"evidence": [],
+		"events": [],
+	}
+	if not bool(snapshot["active"]):
+		return snapshot
+
+	for configured in milestone.get("criteria", []):
+		var criterion: Dictionary = configured
+		var criterion_type := str(criterion.get("type", ""))
+		var criterion_id := str(criterion.get("id", criterion_type))
+		match criterion_type:
+			"rabbit_birth":
+				for entity_id in milestone_born_rabbit_ids:
+					if not simulation.rabbits.has(entity_id):
+						continue
+					var rabbit: Dictionary = simulation.rabbits[entity_id]
+					snapshot["attention"].append({
+						"id": "%s:rabbit:%d" % [criterion_id, int(entity_id)],
+						"criterion_id": criterion_id,
+						"role": "offspring",
+						"entity_kind": "rabbit",
+						"entity_id": int(entity_id),
+						"position": rabbit["position"],
+						"state": "recorded",
+					})
+			"born_rabbit_fed":
+				var feeding_evidence := _born_rabbit_feeding_evidence(criterion, milestone, simulation)
+				for subject in feeding_evidence["subjects"]:
+					snapshot["attention"].append({
+						"id": "%s:rabbit:%d" % [criterion_id, int(subject["entity_id"])],
+						"criterion_id": criterion_id,
+						"role": "offspring",
+						"entity_kind": "rabbit",
+						"entity_id": int(subject["entity_id"]),
+						"position": subject["position"],
+						"state": subject["state"],
+					})
+			"separated_birth_zones":
+				var birth_evidence := _separated_birth_zone_evidence(float(criterion.get("minimum_separation", 220.0)))
+				var zones: Array = birth_evidence["zones"]
+				for zone_index in range(zones.size()):
+					snapshot["evidence"].append({
+						"id": "%s:area:%d" % [criterion_id, zone_index],
+						"criterion_id": criterion_id,
+						"role": "birthplace",
+						"position": zones[zone_index],
+						"ordinal": zone_index + 1,
+						"state": "recorded",
+					})
+				var records: Array = birth_evidence["records"]
+				for record_index in range(records.size()):
+					var record: Dictionary = records[record_index]
+					var zone_index := int(record["zone_index"])
+					snapshot["events"].append({
+						"id": "%s:birth:%d" % [criterion_id, record_index],
+						"criterion_id": criterion_id,
+						"role": "birthplace",
+						"position": zones[zone_index],
+						"source_position": record["position"],
+						"ordinal": zone_index + 1,
+						"state": "established" if bool(record["created_zone"]) else "reinforced",
+					})
+			"safe_havens":
+				var haven_evidence := _cached_spatial_evidence(simulation, criterion)
+				var groups: Array = haven_evidence.get("groups", []).duplicate(true)
+				# Spatial ordering keeps the numbered badges predictable as the live
+				# evaluator refreshes. The renderer receives only a presentation center,
+				# never membership, radius, separation, or food-volume thresholds.
+				groups.sort_custom(func(first: Dictionary, second: Dictionary) -> bool:
+					var first_center: Vector2 = first.get("center", Vector2.ZERO)
+					var second_center: Vector2 = second.get("center", Vector2.ZERO)
+					if not is_equal_approx(first_center.y, second_center.y):
+						return first_center.y < second_center.y
+					return first_center.x < second_center.x
+				)
+				for group_index in range(groups.size()):
+					var group: Dictionary = groups[group_index]
+					var marker := {
+						"id": "%s:nursery:%d" % [criterion_id, group_index],
+						"criterion_id": criterion_id,
+						"role": "nursery",
+						"position": _nursery_presentation_center(group, simulation),
+						"ordinal": group_index + 1,
+						"label": str(criterion.get("lens_label", "Nursery")),
+						"state": "established",
+					}
+					snapshot["evidence"].append(marker)
+					snapshot["events"].append(marker.duplicate(true))
+	return snapshot
+
+func _nursery_presentation_center(group: Dictionary, simulation: EcosystemSimulation) -> Vector2:
+	var center := Vector2.ZERO
+	var living_members := 0
+	for entity_id in group.get("members", []):
+		if not simulation.rabbits.has(entity_id):
+			continue
+		center += Vector2(simulation.rabbits[entity_id]["position"])
+		living_members += 1
+	if living_members > 0:
+		return center / float(living_members)
+	return group.get("center", Vector2.INF)
+
 func spatial_evidence(simulation: EcosystemSimulation, requirements: Dictionary = {}) -> Dictionary:
 	var haven_cfg: Dictionary = progression.get("safe_havens", {}).duplicate(true)
 	for key in ["rabbits_per_group", "minimum_separation", "minimum_local_food"]:
@@ -364,8 +478,11 @@ func debug_lines(simulation: EcosystemSimulation = null) -> Array[String]:
 					evidence = spatial_evidence(simulation, configured)
 					break
 			lines.append("Population rabbit %d · fox %d · phase %s" % [simulation.population("rabbit"), simulation.population("fox"), milestone_phase(simulation)])
+			if float(milestone.get("decline_window", 0.0)) > 0.0:
+				var trend := _trend_goal_result(milestone, simulation, not _is_severely_declining(milestone, simulation))
+				lines.append("Trend rabbit loss %d%% · limit %d%% · window %.0fs" % [int(trend["current"]), int(trend["target"]), float(milestone["decline_window"])])
 			if not evidence.is_empty():
-				lines.append("Havens viable %d · separated %d · separation %.0f" % [evidence["viable_group_count"], evidence["separated_group_count"], evidence["minimum_separation"]])
+				lines.append("Nurseries viable %d · separated %d · separation %.0f" % [evidence["viable_group_count"], evidence["separated_group_count"], evidence["minimum_separation"]])
 	lines.append("Critical %s · entry %.1fs · grace %.1fs · recovery %.1fs" % [str(rabbit_failure_armed), critical_entry_elapsed, critical_elapsed, critical_recovery_elapsed])
 	return lines
 
@@ -407,12 +524,7 @@ func _criterion_progress(criterion: Dictionary, milestone: Dictionary, simulatio
 		"rabbit_birth":
 			current = milestone_rabbit_births
 		"born_rabbit_fed":
-			var eligible_ids: Dictionary = milestone_born_rabbit_ids if bool(criterion.get("fresh_only", false)) else born_rabbit_ids
-			var minimum_age := float(criterion.get("minimum_age", milestone.get("born_survival_age", 0.0)))
-			for rabbit_id in milestone_fed_born_rabbit_ids:
-				if eligible_ids.has(rabbit_id) and simulation.rabbits.has(rabbit_id) \
-					and float(simulation.rabbits[rabbit_id]["age"]) >= minimum_age:
-					current += 1
+			current = int(_born_rabbit_feeding_evidence(criterion, milestone, simulation)["current"])
 		"hunts":
 			current = milestone_hunts
 		"distinct_foxes_fed":
@@ -445,6 +557,33 @@ func _criterion_progress(criterion: Dictionary, milestone: Dictionary, simulatio
 		if criterion.has(detail):
 			result[detail] = criterion[detail]
 	return result
+
+## Identity-level truth for born-animal feeding criteria. Both aggregate
+## progress and the Objective Lens consume this result, so a marker can never
+## disagree with the criterion about whether an animal has satisfied it.
+func _born_rabbit_feeding_evidence(criterion: Dictionary, milestone: Dictionary, simulation: EcosystemSimulation) -> Dictionary:
+	var eligible_ids: Dictionary = milestone_born_rabbit_ids if bool(criterion.get("fresh_only", false)) else born_rabbit_ids
+	var minimum_age := float(criterion.get("minimum_age", milestone.get("born_survival_age", 0.0)))
+	var current := 0
+	var subjects: Array = []
+	for entity_id in eligible_ids:
+		if not simulation.rabbits.has(entity_id):
+			continue
+		var rabbit: Dictionary = simulation.rabbits[entity_id]
+		var has_fed := milestone_fed_born_rabbit_ids.has(entity_id)
+		var old_enough := float(rabbit["age"]) >= minimum_age
+		var satisfied := has_fed and old_enough
+		if satisfied:
+			current += 1
+		subjects.append({
+			"entity_id": int(entity_id),
+			"position": rabbit["position"],
+			"state": "satisfied" if satisfied else ("growing" if has_fed else "needs_food"),
+		})
+	return {
+		"current": current,
+		"subjects": subjects,
+	}
 
 func _milestone_goal_progress(milestone: Dictionary, simulation: EcosystemSimulation, criterion_progress: Array, trend_met: bool) -> Array:
 	var goals: Array = []
@@ -500,16 +639,23 @@ func _trend_goal_result(milestone: Dictionary, simulation: EcosystemSimulation, 
 	if peak > 0:
 		loss_percent = roundi(float(peak - current_population) / float(peak) * 100.0)
 	var maximum_percent := roundi(float(milestone.get("severe_decline_fraction", 1.0)) * 100.0)
+	var status := "falling" if not trend_met else ("under_pressure" if loss_percent > 0 else "stable")
+	var tooltip := "The rabbit population is holding steady."
+	if status == "under_pressure":
+		tooltip = "The rabbit population dipped recently, but this checkpoint can still progress. Keep food nearby and avoid adding more pressure."
+	elif status == "falling":
+		tooltip = "The rabbit population is falling too quickly, so the checkpoint is paused. Add food or rabbits, then give the colony a moment to recover."
 	return {
 		"id": "rabbit_trend",
 		"type": "trend",
-		"label": "Rabbit loss (%ds)" % roundi(window),
-		"metric_label": "RECENT RABBIT LOSS",
+		"label": "Colony stability",
+		"metric_label": "COLONY STABILITY",
 		"kind": "rabbit",
 		"current": loss_percent,
 		"target": maximum_percent,
 		"met": trend_met,
-		"tooltip": "%d rabbits now; recent peak %d. The checkpoint pauses if losses exceed %d%%." % [current_population, peak, maximum_percent],
+		"status": status,
+		"tooltip": tooltip,
 		"unmet_state": "danger",
 	}
 
@@ -546,16 +692,34 @@ func _criterion_kind(criterion_type: String) -> String:
 	return "leaf"
 
 func _separated_birth_zone_count(minimum_separation: float) -> int:
-	var representatives: Array[Vector2] = []
+	return int(_separated_birth_zone_evidence(minimum_separation)["zones"].size())
+
+## Canonical classification for both checkpoint evaluation and its player-safe
+## evidence projection. Each birth is assigned to the first established area it
+## falls within, or establishes a new representative area. Presentation never
+## receives minimum_separation itself.
+func _separated_birth_zone_evidence(minimum_separation: float) -> Dictionary:
+	var zones: Array[Vector2] = []
+	var records: Array = []
 	for position in milestone_birth_positions:
-		var separated := true
-		for existing in representatives:
-			if position.distance_to(existing) < minimum_separation:
-				separated = false
+		var zone_index := -1
+		for existing_index in range(zones.size()):
+			if position.distance_to(zones[existing_index]) < minimum_separation:
+				zone_index = existing_index
 				break
-		if separated:
-			representatives.append(position)
-	return representatives.size()
+		var created_zone := zone_index == -1
+		if created_zone:
+			zones.append(position)
+			zone_index = zones.size() - 1
+		records.append({
+			"position": position,
+			"zone_index": zone_index,
+			"created_zone": created_zone,
+		})
+	return {
+		"zones": zones,
+		"records": records,
+	}
 
 func _cached_spatial_evidence(simulation: EcosystemSimulation, requirements: Dictionary) -> Dictionary:
 	var cache_key := str(requirements)
@@ -609,6 +773,7 @@ func _complete_current_milestone() -> void:
 	_reset_milestone_evidence()
 
 func _reset_milestone_evidence() -> void:
+	milestone_evidence_revision += 1
 	milestone_stability = 0.0
 	milestone_rabbit_births = 0
 	milestone_hunts = 0

@@ -224,6 +224,9 @@ func current_objective_status() -> String:
 func current_objective_progress() -> Dictionary:
 	return run_director.milestone_progress(simulation)
 
+func current_objective_lens() -> Dictionary:
+	return run_director.objective_lens_snapshot(simulation)
+
 func continue_observing() -> bool:
 	if not run_director.continue_observing():
 		return false

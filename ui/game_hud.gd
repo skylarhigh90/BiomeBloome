@@ -660,7 +660,7 @@ func _refresh_objective() -> void:
 		var hold_state := "success" if hold_ratio >= 1.0 else ("warning" if bool(progress["hold_active"]) else _checkpoint_semantic_state(state, phase))
 		objective_progress_view.set_hold_progress(hold_ratio, hold_state, true)
 		objective_progress_view.set_guidance(
-			_checkpoint_guidance(objective, progress),
+			_checkpoint_hint(objective),
 			str(objective.get("teaser", "Keep watching the web."))
 		)
 	objective_progress_view.set_next(str(coach["title"]), str(coach["detail"]))
@@ -693,7 +693,17 @@ func _checkpoint_goals(_objective: Dictionary, progress: Dictionary) -> Array[Di
 				"absent": "normal",
 			}.get(health_status, "normal")
 		elif goal_type == "trend":
-			value = "%d/%d%% max" % [int(goal.get("current", 0)), int(goal.get("target", 0))]
+			var trend_status := str(goal.get("status", "stable" if met else "falling"))
+			value = {
+				"stable": "Stable",
+				"under_pressure": "Under pressure",
+				"falling": "Falling fast",
+			}.get(trend_status, "Stable" if met else "Falling fast")
+			state = {
+				"stable": "success",
+				"under_pressure": "warning",
+				"falling": "danger",
+			}.get(trend_status, "success" if met else "danger")
 		var kind := str(goal.get("kind", ""))
 		rows.append({
 			"id": str(goal.get("id", goal_type)),
@@ -782,30 +792,17 @@ func _player_goal_label(goal: Dictionary) -> String:
 		"health":
 			return "Rabbit hunger" if str(goal.get("kind", "")) == "rabbit" else "Fox hunger"
 		"trend":
-			return str(goal.get("label", "Recent rabbit loss"))
+			return str(goal.get("label", "Colony stability"))
 		"rabbit_population":
 			return "Rabbits alive"
 		"fox_population":
 			return "Foxes alive"
 	return str(goal.get("label", "The meadow keeps going"))
 
-func _checkpoint_guidance(objective: Dictionary, progress: Dictionary) -> String:
-	var phase := str(progress.get("phase", ""))
-	if phase == "starving":
-		return "Bring food closer to the animals under pressure, then give them a moment to recover."
-	if phase == "declining":
-		return "Ease the pressure and support the rabbits before pushing the meadow forward."
-	if phase == "low":
-		return "Add a little life or food, then watch where the animals choose to settle."
-	if phase == "evidence" and str(objective.get("id", "")) == "nursery_network":
-		for configured in progress.get("criteria", []):
-			var criterion: Dictionary = configured
-			if bool(criterion.get("met", false)):
-				continue
-			if str(criterion.get("type", "")) == "safe_havens":
-				return "Build three well-spaced food patches and keep at least three rabbits around each one. All three nurseries need to hold at the same time."
-	if phase == "stabilizing":
-		return "The meadow is finding its balance. Keep changes gentle and let it settle."
+## A hint explains the current checkpoint's rules, so it is deliberately
+## objective-scoped rather than phase-scoped. Live conditions belong in
+## TRY THIS; otherwise an open definition flickers as evidence comes and goes.
+func _checkpoint_hint(objective: Dictionary) -> String:
 	return str(objective.get("guidance", ""))
 
 func _on_objective_details_toggled(_open: bool) -> void:
@@ -900,7 +897,7 @@ func _qualitative_objective_coach(objective_id: String, phase: String, run_state
 		"life_returns":
 			return {"title": "Let a fox kill 1 rabbit.", "detail": "Complete kill → birth → kill while keeping at least 7 rabbits alive.", "kind": "fox"}
 		"two_safe_havens":
-			return {"title": "Keep both havens alive.", "detail": "Feed two rabbit groups and let the foxes move through without emptying either one.", "kind": "rabbit"}
+			return {"title": "Keep both nurseries alive.", "detail": "Keep two nurseries fed and let the foxes move through without emptying either one.", "kind": "rabbit"}
 		"predators_find_place":
 			return {"title": "Help both predators share the meadow.", "detail": "Spread out food and rabbits so both foxes can feed while life continues.", "kind": "fox"}
 		"living_ecosystem":

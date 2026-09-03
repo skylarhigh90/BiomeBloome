@@ -1,11 +1,23 @@
 extends Node2D
 
+const CAMERA_ZOOM_MIN := 0.46
+const CAMERA_ZOOM_MAX := 1.90
+const CAMERA_MANUAL_RESPONSE := 5.2
+const CAMERA_RESIZE_RESPONSE := 3.4
+# World expansions should feel like the almost-imperceptible map reveals in
+# Mini Motorways, not a cut to a new overview. This response takes roughly
+# twenty seconds to settle without ever interrupting play.
+const CAMERA_EXPANSION_RESPONSE := 0.18
+const DESKTOP_TERRAIN_HEIGHT_COVERAGE := 1.08
+const DESKTOP_TERRAIN_WIDTH_COVERAGE := 0.84
+
 var config: Dictionary
 var systems: GameSystems
 var world_view: WorldView
 var camera: Camera2D
 var hud: GameHUD
 var camera_zoom_target := 1.0
+var camera_zoom_response := CAMERA_RESIZE_RESPONSE
 var camera_manual_cooldown := 0.0
 var dragging_camera := false
 var debug_enabled := false
@@ -28,6 +40,7 @@ func _ready() -> void:
 	add_child(camera)
 	camera_zoom_target = _fit_zoom_for_radius(systems.simulation.world_radius)
 	camera.zoom = Vector2.ONE * camera_zoom_target
+	world_view.set_camera_zoom(camera.zoom.x)
 
 	hud = GameHUD.new()
 	hud.name = "HUD"
@@ -61,8 +74,13 @@ func _update_camera(delta: float) -> void:
 	if input_direction.length_squared() > 0.0:
 		camera.position += input_direction * 330.0 / camera.zoom.x * delta
 		camera_manual_cooldown = 4.0
-	var zoom_value := lerpf(camera.zoom.x, camera_zoom_target, 1.0 - exp(-delta * 4.2))
+	var zoom_value := lerpf(camera.zoom.x, camera_zoom_target, 1.0 - exp(-delta * camera_zoom_response))
 	camera.zoom = Vector2.ONE * zoom_value
+	world_view.set_camera_zoom(zoom_value)
+	if absf(zoom_value - camera_zoom_target) < 0.002:
+		camera.zoom = Vector2.ONE * camera_zoom_target
+		world_view.set_camera_zoom(camera_zoom_target)
+		camera_zoom_response = CAMERA_RESIZE_RESPONSE
 	var pan_limit := maxf(0.0, systems.simulation.world_radius - 120.0 / camera.zoom.x)
 	if camera.position.length() > pan_limit:
 		camera.position = camera.position.normalized() * pan_limit
@@ -71,18 +89,28 @@ func _fit_zoom_for_radius(radius: float) -> float:
 	var viewport_size := get_viewport_rect().size
 	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
 		viewport_size = Vector2(1280.0, 800.0)
-	var reserved_vertical := 150.0
-	var available := Vector2(viewport_size.x - 90.0, viewport_size.y - reserved_vertical)
-	var diameter := radius * 2.0 + 70.0
-	return clampf(minf(available.x / diameter, available.y / diameter), 0.42, 1.45)
+	# Treat the world as a terrain window instead of a miniature that must fit in
+	# full. A small amount of edge crop removes the empty halo and gives the
+	# starting colony enough physical presence to read at a glance.
+	var aspect := viewport_size.x / maxf(1.0, viewport_size.y)
+	var width_coverage := DESKTOP_TERRAIN_WIDTH_COVERAGE if aspect >= 1.25 else 0.92
+	var target_diameter := minf(
+		viewport_size.x * width_coverage,
+		viewport_size.y * DESKTOP_TERRAIN_HEIGHT_COVERAGE
+	)
+	return clampf(target_diameter / maxf(1.0, radius * 2.0), CAMERA_ZOOM_MIN, 1.55)
 
 func _on_world_expanded(new_radius: float) -> void:
-	# Expansions always get a gentle accommodation; later manual zoom remains possible.
-	camera_zoom_target = minf(camera_zoom_target, _fit_zoom_for_radius(new_radius))
+	# Reveal the wider terrain continuously instead of snapping to a fitted map.
+	var expanded_target := _fit_zoom_for_radius(new_radius)
+	if expanded_target < camera_zoom_target:
+		camera_zoom_target = expanded_target
+		camera_zoom_response = CAMERA_EXPANSION_RESPONSE
 
 func _on_viewport_size_changed() -> void:
 	if camera_manual_cooldown <= 0.0:
 		camera_zoom_target = _fit_zoom_for_radius(systems.simulation.world_radius)
+		camera_zoom_response = CAMERA_RESIZE_RESPONSE
 
 func _unhandled_input(event: InputEvent) -> void:
 	if systems.supply_pending:
@@ -109,14 +137,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 			var factor := 1.12 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.12
-			camera_zoom_target = clampf(camera_zoom_target * factor, 0.42, 1.8)
+			camera_zoom_target = clampf(camera_zoom_target * factor, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX)
+			camera_zoom_response = CAMERA_MANUAL_RESPONSE
 			camera_manual_cooldown = 7.0
 			get_viewport().set_input_as_handled()
 			return
 		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			var world_position := get_global_mouse_position()
 			if not systems.selected_item.is_empty():
-				var placed_id := systems.place_item(systems.selected_item, world_position)
+				var placed_id := -1
+				if world_view.is_position_revealed(world_position):
+					placed_id = systems.place_item(systems.selected_item, world_position)
 				if placed_id != -1:
 					hud.refresh()
 				_update_placement_preview()
@@ -150,7 +181,8 @@ func _handle_supply_input(event: InputEvent) -> void:
 			return
 		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 			var factor := 1.12 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.12
-			camera_zoom_target = clampf(camera_zoom_target * factor, 0.42, 1.8)
+			camera_zoom_target = clampf(camera_zoom_target * factor, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX)
+			camera_zoom_response = CAMERA_MANUAL_RESPONSE
 			camera_manual_cooldown = 7.0
 			get_viewport().set_input_as_handled()
 			return
@@ -195,7 +227,8 @@ func _update_placement_preview() -> void:
 		return
 	var item := systems.selected_item
 	var position := get_global_mouse_position()
-	world_view.set_placement_preview(item, position, systems.can_place(item, position), not item.is_empty() and not systems.supply_pending)
+	var valid := world_view.is_position_revealed(position) and systems.can_place(item, position)
+	world_view.set_placement_preview(item, position, valid, not item.is_empty() and not systems.supply_pending)
 
 func _toggle_debug() -> void:
 	debug_enabled = not debug_enabled

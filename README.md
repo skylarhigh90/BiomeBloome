@@ -21,6 +21,7 @@ Or import/open `project.godot` in Godot 4.7.2 (or a compatible later Godot 4.x s
 - Supply arrivals automatically pause the meadow and open **Meadow Mail**. Choose a bundle with the mouse, arrow keys + Enter, or **1 / 2**.
 - Press **E** or **Escape** during a supply choice to hide the rewards and inspect the paused ecosystem. Press it again—or use **Back to choices**—to return. Camera pan and zoom remain available while peeking, but the meadow cannot be changed.
 - The top population strip summarizes rabbit forage health. Amber rings mark rabbits that cannot find food; coral rings mean they are starving.
+- During relevant checkpoints, the Objective Lens gently marks evaluator-recognized offspring, remembered birthplaces, and live nurseries. A literal numbered plaque connects each recognized nursery to the HUD count; markers fade when the objective no longer uses that evidence.
 - Press Escape to clear the current placement selection.
 - Press **F3** for development debug mode; with no inventory item selected, click an animal to inspect its state and perception ranges.
 - Restart requires two clicks within three seconds.
@@ -39,14 +40,14 @@ The run unfolds through ten ecological checkpoints. The opening now teaches one 
 
 - The first five checkpoints ramp through rabbit populations of **4 → 6 → 8 → 10 → 12**.
 - **New Arrivals** requires two natural births, and **Young Foragers** then requires two meadow-born rabbits to mature and feed.
-- **Life Across the Meadow** requires fresh births in three separated areas. **A Nursery Network** follows by asking for three simultaneous nurseries of at least three rabbits near usable food.
-- Checkpoints 5, 7, and 9 are major meadow beats with expansion or staging rewards. Completing checkpoint 5 unlocks Foxes, introduces a pair, and switches to the Web supply pool. Only final success opens a modal.
+- **Life Across the Meadow** requires fresh births in three separated areas. **A Nursery Network** follows by asking for three simultaneous nurseries of at least three rabbits near usable food in the gradually expanded meadow.
+- Every completed checkpoint reveals one small additional band of the persistent terrain. Checkpoints 5, 7, and 9 remain the major staging beats; checkpoint 5 unlocks Foxes, introduces a pair, and switches to the Web supply pool. Only final success opens a modal.
 - Predator play ramps through **hunt → birth**, then **hunt → birth → hunt**. Extra events do not erase valid progress, but unfinished sequences expire.
-- **Havens Under Pressure** combines two separated, fed refuges with a fresh hunt-and-renewal cycle and a full 12-second healthy hold.
+- **Nurseries Under Pressure** combines two separated, fed nurseries with a fresh hunt-and-renewal cycle and a full 12-second healthy hold.
 - **Predators Find Their Place** additionally requires two distinct living hunters and at least four rabbits per fox.
-- **Living Ecosystem** combines three havens, two hunters, distributed births, a healthy prey reserve, and **hunt → birth → hunt → birth → hunt**, followed by a 20-second hold.
+- **Living Ecosystem** combines three nurseries, two hunters, distributed births, a healthy prey reserve, and **hunt → birth → hunt → birth → hunt**, followed by a 20-second hold.
 - The normal HUD shows every active condition as a task/status checklist, including populations, ecological evidence, health, trend, sequence order, and hold progress. F3 retains deeper diagnostics.
-- Major completions expand the same persistent world from 360 → 505 → 650 → 795; existing creatures and plants remain in place.
+- The same persistent world grows in nine 48-unit steps from radius 360 → 792. The camera follows each reveal at a deliberately slow, nearly continuous rate; existing creatures and plants remain in place.
 - After checkpoint 5, losing rabbit breeding viability can make the ecosystem Critical. The first collapse has one hidden supply safety net; later collapses can end the run.
 - A completed run can continue as a sandbox epilogue or restart as a fresh ecosystem.
 
@@ -58,7 +59,7 @@ V0.4 terrain systems make placement geography part of that progression:
 - Woodland remains the terrain Foxes favor while roaming. Rabbits retain their weaker preference for open ground, while active feeding, fleeing, and hunting can override both tendencies.
 - Thicket is low, dense refuge cover. Threatened Rabbits can choose a reachable patch; Fox movement and capture buildup are reduced inside it, but successful hunts remain possible. Berry Bushes recover best around mixed Woodland/Thicket margins rather than deep cover.
 - One seeded Stream crosses the maximum world. Deep water rejects placement and blocks Rabbit/Fox movement; visible shallow fords provide the valid routes between banks. Expansion reveals more of the same Stream instead of generating new water.
-- Food choice, prey choice, threat response, mating, reproduction food, newborn placement, and Safe Haven evidence now use terrain reachability where straight-line distance would be misleading.
+- Food choice, prey choice, threat response, mating, reproduction food, newborn placement, and nursery evidence now use terrain reachability where straight-line distance would be misleading.
 
 Normal play communicates these rules through movement, plant fullness, cover, banks, and crossings. Exact habitat samples and route state remain F3-only.
 
@@ -69,7 +70,8 @@ Normal play communicates these rules through movement, plant fullness, cover, ba
 - `simulation/spatial_hash.gd` rebuilds a lightweight local lookup each tick, avoiding all-to-all searches.
 - `game/run_director.gd` owns milestones, current-run unlocks, ecological Critical/Game Over, completion, and the progression snapshot shown by the HUD.
 - `game/game_systems.gd` owns the fixed-step accumulator, inventory, milestone-aware supplies, speed, and coordination with world expansion.
-- `rendering/world_view.gd` renders interpolated simulation state with original code-drawn terrain, plants, animals, and feedback.
+- `rendering/objective_lens.gd` diffs the director's player-safe semantic evidence projection and owns marker fades plus one-shot evidence feedback. It does not evaluate checkpoint rules.
+- `rendering/world_view.gd` renders interpolated simulation state with original code-drawn terrain, plants, animals, Objective Lens primitives, and feedback.
 - `ui/game_hud.gd` contains the compact game HUD and debug inspector.
 - `game/main.gd` connects input, camera, systems, presentation, and UI.
 
@@ -118,7 +120,7 @@ Run the compound-checkpoint, spatial-evidence, reward, UI, and failure suite:
 godot --headless --path . --script res://tests/progression_runner.gd
 ```
 
-Run the focused V0.4 generation, placement, behavior, reachability, Safe Haven, and route-budget suite:
+Run the focused V0.4 generation, placement, behavior, reachability, nursery-evidence, and route-budget suite:
 
 ```sh
 godot --headless --path . --script res://tests/terrain_runner.gd
@@ -130,7 +132,7 @@ Run the V0.4 live terrain scenario trials (Open Meadow, nearby/poor Thicket refu
 godot --headless --path . --script res://tests/terrain_playtest_runner.gd
 ```
 
-Run the three strategy contrasts (dump everything, deliberate refuge-network play, and predator overstock). The deliberate strategy must reach the hard compound refuge arc in a recoverable state; exact full-run reachability is covered deterministically by the progression suite:
+Run the three strategy contrasts (dump everything, deliberate nursery-network play, and predator overstock). The deliberate strategy must reach the hard compound nursery arc in a recoverable state; exact full-run reachability is covered deterministically by the progression suite:
 
 ```sh
 godot --headless --path . --script res://tests/playtest_runner.gd
@@ -141,6 +143,12 @@ Run the social-vision radius sweep, or override the radius for a deliberate live
 ```sh
 godot --headless --path . --script res://tests/social_vision_runner.gd
 godot --headless --path . --script res://tests/playtest_runner.gd deliberate 800 50
+```
+
+Run the checkpoint-reactive opening (compact start, then spread only when requested). The optional fourth argument is a harness-only Rabbit ceiling:
+
+```sh
+godot --headless --path . --script res://tests/playtest_runner.gd reactive 120 -1 24
 ```
 
 Run the balance diagnostic (all variants, or append one name such as `current`):

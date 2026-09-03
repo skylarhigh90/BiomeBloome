@@ -26,6 +26,18 @@ The HUD remains runtime-built because its contents and unlock set are dynamic. R
 - Reusable controls own their internal container composition, minimum-size contract, and content/state API. They consume theme variations and spacing tokens; they do not invent local visual tokens.
 - `GameHUD` owns gameplay-derived copy, state binding, semantic variation selection, top-level responsive placement/sizing, and short entrance animations. It does not build local StyleBoxes or apply font, color, or StyleBox overrides.
 
+### In-world objective observability
+
+The Objective Lens complements the checkpoint shell when a criterion depends on identity or spatial history that is difficult to read directly in the biome. `RunDirector.objective_lens_snapshot()` is the player-safe evidence boundary: it exposes semantic entity attention, recorded places, and new evidence events while withholding evaluator radii and optimal destinations. `rendering/objective_lens.gd` owns diffing, fades, and event deduplication; `WorldView` owns the restrained world-space drawing primitives.
+
+The projection is criterion-driven rather than checkpoint-driven. Current primitives cover evaluator-recognized offspring states, distinct birthplaces, and live nursery groups. Nursery markers use a fixed-size organic cradle and a literal numbered cream plaque so they remain distinct from individual hunger rings and remembered birthplace symbols. A renderer must never inspect a checkpoint ID or independently reproduce age, feeding, grouping, or separation rules. Exact constants remain development-debug information.
+
+### Terrain framing and world-space legibility
+
+The playfield is presented as a terrain window rather than a raised globe that must remain fully visible. At desktop aspect ratios the playable edge slightly overscans the viewport, and the surrounding unrevealed ground uses a muted terrain tone instead of empty void. Every completed checkpoint reveals one small persistent band of terrain; `Main` eases the camera toward the new fit slowly enough that geography accumulates rather than arriving as a single overview cut.
+
+Rabbits, foxes, forage patches, placement previews, and Objective Lens markers use bounded camera-aware presentation scaling. Their simulation positions, perception ranges, grouping radii, and placement rules remain in world units and do not change. The compensation preserves most—not all—of their screen size as the terrain grows, so the wider ecosystem is perceptible without reducing actionable pieces to specks.
+
 This boundary is deliberately small. A new variation should live in the Theme when it represents a reusable visual meaning; a new component is warranted only when a repeated or compound control has a stable content contract.
 
 ## Typography
@@ -102,7 +114,9 @@ Buttons define default, hover, pressed, focus, and disabled states centrally. Re
 
 The checkpoint shell is intentionally scan-first. It keeps the checkpoint eyebrow, title, short summary, and one compact row per goal. Ordered cycles render as literal event rows—for example, `Fox kills a rabbit` and `Rabbit is born`—without adding another section. A concise `TRY THIS` next action is available below the rows, while `Need a hint?` opens optional explanatory detail for players who want more context. The hold bar remains as a quiet visual cue below the rows.
 
-Every rule that can stop checkpoint completion is visible in the row itself. Quantitative rows use a compact current/target format with the unit at the end, such as `0/6 rabbits`, `1/2 foxes`, or `0/4 sec`. Maximum thresholds retain their meaning with a trailing `max`, such as `4/20% max`. Rabbit/Fox hunger remain short, color-coded `Fed`, `Hungry`, and `Starving` states, while tooltips and the optional hint can provide exact details when needed. Population and animal-specific rows retain the rabbit or fox glyph for fast recognition; F3 remains reserved for raw evaluator diagnostics.
+Hints are objective-scoped rule explanations and remain stable for the lifetime of a checkpoint. Live population, evidence, hunger, decline, and stabilization phases may update `TRY THIS`, goal values, and semantic colors, but they must not replace an open hint. Hint copy stays in the checkpoint card's normal content flow rather than a nested scroll region, so definitions remain readable when evidence fluctuates near a threshold.
+
+Every rule that can stop checkpoint completion is visible in the row itself. Quantitative rows use a compact current/target format with the unit at the end, such as `0/6 rabbits`, `1/2 foxes`, or `0/4 sec`. Internal trend thresholds are translated into the player-facing `Stable`, `Under pressure`, and `Falling fast` colony states; their tuning percentages do not appear in the normal HUD. Rabbit/Fox hunger remain short, color-coded `Fed`, `Hungry`, and `Starving` states, while tooltips and the optional hint can provide plain-language recovery actions. Population and animal-specific rows retain the rabbit or fox glyph for fast recognition; F3 remains reserved for raw evaluator diagnostics.
 
 `GameHUD` renders the structured `goals` returned by `GameSystems.current_objective_progress()` and adds the final hold row. The progression layer remains the source of truth for task labels, targets, completion, and semantic warning state. Evidence includes:
 
@@ -112,12 +126,12 @@ Every rule that can stop checkpoint completion is visible in the row itself. Qua
 | `rabbit_birth` | natural births / configured birth target |
 | `born_rabbit_fed` | surviving young rabbits fed / configured target |
 | `distinct_foxes_fed` | distinct living foxes fed / configured target |
-| `safe_havens` | current viable havens / configured minimum groups |
+| `safe_havens` | current viable nurseries / configured minimum groups |
 | `separated_birth_zones` | separated birthplaces / configured target |
 | `prey_per_fox` | current rabbits per living fox / configured target |
 | `ordered_cycle` | one indexed row per literal fox-kill or rabbit-birth step |
 | species health | separate Rabbit/Fox `Fed`, `Hungry`, or `Starving` live state |
-| rabbit trend | recent loss percentage / configured maximum percentage |
+| rabbit trend | `Stable`, `Under pressure`, or `Falling fast` colony state |
 
 Critical uses living rabbits / configured recovery population; completion uses completed checkpoints; sandbox uses continuous observation. These are presentation mappings over structured state, not duplicate progression rules or decorative counters.
 

@@ -4,6 +4,11 @@ const Config = preload("res://config/game_config.gd")
 const Systems = preload("res://game/game_systems.gd")
 
 const RUN_DURATION := 800.0
+const REACTIVE_OPENING_CENTERS := [
+	Vector2.ZERO,
+	Vector2(-290.0, -170.0),
+	Vector2(290.0, -170.0),
+]
 const CHECKPOINT_ORDER := [
 	"colony_gathers",
 	"new_arrivals",
@@ -27,17 +32,21 @@ func _initialize() -> void:
 	var social_radius := -1.0
 	if requested.size() > 2:
 		social_radius = float(requested[2])
+	var population_cap := -1
+	if requested.size() > 3:
+		population_cap = int(requested[3])
 	if not requested.is_empty():
-		var requested_result := _run_strategy(str(requested[0]), duration, social_radius)
+		var requested_result := _run_strategy(str(requested[0]), duration, social_radius, population_cap)
 		var radius_label := "default" if social_radius < 0.0 else "social radius %.0f" % social_radius
-		print("\nSTRATEGY PLAYTEST · %s · %s: %s" % [str(requested[0]).to_upper(), radius_label, str(requested_result)])
+		var cap_label := "default cap" if population_cap < 0 else "cap %d" % population_cap
+		print("\nSTRATEGY PLAYTEST · %s · %s · %s: %s" % [str(requested[0]).to_upper(), radius_label, cap_label, str(requested_result)])
 		quit(0)
 		return
 	var dump := _run_strategy("dump", minf(duration, 360.0))
 	var deliberate := _run_strategy("deliberate", duration)
 	var overstock := _run_strategy("predator_overstock", minf(duration, 700.0))
 	print("\nSTRATEGY PLAYTEST · DUMP EVERYTHING: %s" % str(dump))
-	print("STRATEGY PLAYTEST · DELIBERATE REFUGE-NETWORK: %s" % str(deliberate))
+	print("STRATEGY PLAYTEST · DELIBERATE NURSERY-NETWORK: %s" % str(deliberate))
 	print("STRATEGY PLAYTEST · PREDATOR OVERSTOCK: %s" % str(overstock))
 	if bool(dump["completed"]) or str(dump["stopped_at"]) != "birthplaces":
 		printerr("PLAYTEST FAILED: dense central placement bypassed the separated-birthplace checkpoint.")
@@ -45,7 +54,7 @@ func _initialize() -> void:
 		return
 	var deliberate_rank := CHECKPOINT_ORDER.size() if bool(deliberate["completed"]) else CHECKPOINT_ORDER.find(str(deliberate["stopped_at"]))
 	if deliberate_rank < CHECKPOINT_ORDER.find("two_safe_havens") or str(deliberate["state"]) == RunDirector.STATE_GAME_OVER:
-		printerr("PLAYTEST FAILED: deliberate refuge-network play did not reach the compound refuge challenge in a recoverable state.")
+		printerr("PLAYTEST FAILED: deliberate nursery-network play did not reach the compound nursery challenge in a recoverable state.")
 		quit(1)
 		return
 	if bool(deliberate["completed"]) and float(deliberate["simulation_time"]) < 500.0:
@@ -56,22 +65,25 @@ func _initialize() -> void:
 		printerr("PLAYTEST FAILED: completion did not arise from enough live ecological events.")
 		quit(1)
 		return
-	print("Playtest passed: deliberate play reached the hard compound refuge arc through live births, feeding, hunts, spatial evidence, and supplies without an automatic quick completion.")
+	print("Playtest passed: deliberate play reached the hard compound nursery arc through live births, feeding, hunts, spatial evidence, and supplies without an automatic quick completion.")
 	print("Full checkpoint reachability is covered by progression_runner; contrast strategies report their stopping checkpoint and ecological outcome above.")
 	quit(0)
 
-func _run_strategy(strategy: String, duration: float, social_radius: float = -1.0) -> Dictionary:
+func _run_strategy(strategy: String, duration: float, social_radius: float = -1.0, population_cap: int = -1) -> Dictionary:
 	placement_serial = 0
 	var playtest_config := Config.make().duplicate(true)
 	if social_radius >= 0.0:
 		playtest_config["rabbit"]["social_proximity_radius"] = social_radius
-	# Keep long strategy comparisons computationally bounded. The live game can
-	# still grow to its configured cap; this harness only needs ample headroom
-	# above the final 12-rabbit contract to exercise every ecological condition.
-	playtest_config["rabbit"]["max_population"] = 16
+	# Keep long strategy comparisons computationally bounded. Incremental world
+	# reveals give rabbits more room to roam, so deliberate play receives enough
+	# headroom to reinforce all three nurseries; dense dumping remains capped more
+	# tightly, while the reactive opening may use a modest additional reserve.
+	var default_population_cap := 16 if strategy == "dump" else (24 if strategy == "reactive" else 20)
+	playtest_config["rabbit"]["max_population"] = population_cap if population_cap > 0 else default_population_cap
 	playtest_config["fox"]["max_population"] = 10
 	var systems = Systems.new(playtest_config)
 	var checkpoint_times: Dictionary = {}
+	var checkpoint_populations: Dictionary = {}
 	var evidence_times: Dictionary = {}
 	var evidence_streaks: Dictionary = {}
 	var maximum_evidence_streaks: Dictionary = {}
@@ -80,6 +92,7 @@ func _run_strategy(strategy: String, duration: float, social_radius: float = -1.
 	var rabbit_high := 0
 	systems.milestone_completed.connect(func(_index: int, milestone_id: String, _message: String) -> void:
 		checkpoint_times[milestone_id] = snappedf(systems.simulation.simulation_time, 0.1)
+		checkpoint_populations[milestone_id] = systems.simulation.population("rabbit")
 	)
 	systems.simulation.entity_added.connect(func(kind: String, _entity_id: int, reason: String) -> void:
 		if kind == "rabbit" and reason == "birth":
@@ -147,6 +160,7 @@ func _run_strategy(strategy: String, duration: float, social_radius: float = -1.
 		"stopped_at": "complete" if completed else systems.run_director.current_milestone_id(),
 		"simulation_time": snappedf(completion_time, 0.1),
 		"checkpoint_times": checkpoint_times,
+		"checkpoint_populations": checkpoint_populations,
 		"evidence_times": evidence_times,
 		"maximum_evidence_streaks": maximum_evidence_streaks,
 		"checkpoint_waits": waits,
@@ -170,6 +184,10 @@ func _place_inventory(systems, strategy: String) -> void:
 	var plant_target := 999 if strategy == "dump" else (16 if systems.run_director.has_completed("life_returns") else 10)
 	if strategy != "dump":
 		plant_target = maxi(plant_target, ceili(float(rabbit_population) * 0.9))
+	# A checkpoint-reactive player follows the compact opening instructions and
+	# saves most of the starting forage until separate birthplaces are requested.
+	if strategy == "reactive" and systems.run_director.milestone_index < 3:
+		plant_target = 4
 	var hunger: Dictionary = systems.simulation.hunger_summary("rabbit")
 	if int(hunger.get("unserved_count", 0)) > 0:
 		plant_target += 12
@@ -182,6 +200,8 @@ func _place_inventory(systems, strategy: String) -> void:
 		if not _place_plant(systems, "berry_bush", strategy):
 			break
 	var rabbit_limit := 999 if strategy == "dump" else 6
+	if strategy == "reactive":
+		rabbit_limit = 4 if systems.run_director.milestone_index < 3 else 16
 	if systems.run_director.has_completed("nursery_network"):
 		rabbit_limit = 12
 	if systems.run_director.has_completed("two_safe_havens"):
@@ -226,7 +246,9 @@ func _best_plant_position(systems, plant_type: String, strategy: String) -> Vect
 		return _refuge_position(systems, strategy, "plant")
 	var refuge_centers := _strategy_refuge_centers(systems)
 	var anchor: Vector2 = refuge_centers[placement_serial % refuge_centers.size()]
-	if systems.simulation.population("rabbit") < 8:
+	if strategy == "reactive" and not systems.run_director.has_completed("nursery_network"):
+		anchor = Vector2.ZERO if systems.run_director.milestone_index < 3 else _least_supported_reactive_center(systems, "plant")
+	elif systems.simulation.population("rabbit") < 8:
 		var neediest: Dictionary = {}
 		for rabbit in systems.simulation.rabbits.values():
 			if float(rabbit["hunger"]) >= float(systems.config["rabbit"]["hunger_warning_at"]) \
@@ -261,6 +283,13 @@ func _refuge_position(systems, strategy: String, kind: String) -> Vector2:
 	if strategy == "dump":
 		var dump_radius := 12.0 + float(placement_serial % 5) * 9.0
 		return Vector2.from_angle(float(placement_serial) * 2.399) * dump_radius
+	if strategy == "reactive" and not systems.run_director.has_completed("nursery_network"):
+		var reactive_center := Vector2.ZERO if systems.run_director.milestone_index < 3 else _least_supported_reactive_center(systems, kind)
+		var reactive_radius := 9.0 + float(placement_serial % 4) * 8.0
+		var reactive_candidate := reactive_center + Vector2.from_angle(float(placement_serial) * 2.399) * reactive_radius
+		if systems.simulation.is_position_valid(reactive_candidate):
+			return reactive_candidate
+		return reactive_center * 0.9
 	var refuge_centers := _strategy_refuge_centers(systems)
 	var center: Vector2 = refuge_centers[placement_serial % refuge_centers.size()]
 	var radius := 8.0 + float((placement_serial / refuge_centers.size()) % 5) * (13.0 if kind == "plant" else 7.0)
@@ -288,6 +317,21 @@ func _refuge_position(systems, strategy: String, kind: String) -> Vector2:
 
 func _strategy_refuge_centers(_systems) -> Array[Vector2]:
 	return [Vector2(-230.0, -140.0), Vector2(230.0, -140.0), Vector2(240.0, 180.0)]
+
+func _least_supported_reactive_center(systems, kind: String) -> Vector2:
+	var best_center: Vector2 = REACTIVE_OPENING_CENTERS[0]
+	var best_count := 999999
+	for configured_center in REACTIVE_OPENING_CENTERS:
+		var center: Vector2 = configured_center
+		var count := 0
+		var entities: Array = systems.simulation.plants.values() if kind == "plant" else systems.simulation.rabbits.values()
+		for entity in entities:
+			if center.distance_to(entity["position"]) <= 150.0:
+				count += 1
+		if count < best_count:
+			best_count = count
+			best_center = center
+	return best_center
 
 func _choose_supply(systems, strategy: String) -> int:
 	var best_index := 0

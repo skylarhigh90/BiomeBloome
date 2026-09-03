@@ -3,6 +3,7 @@ extends SceneTree
 const Config = preload("res://config/game_config.gd")
 const Systems = preload("res://game/game_systems.gd")
 const HUD = preload("res://ui/game_hud.gd")
+const Lens = preload("res://rendering/objective_lens.gd")
 
 var failures: Array[String] = []
 var passed := 0
@@ -13,6 +14,10 @@ func _initialize() -> void:
 	_test_new_arrivals_requires_two_births()
 	_test_young_foragers_require_born_rabbits_to_feed()
 	_test_birthplaces_require_three_separated_births()
+	_test_objective_lens_tracks_newborn_identity_and_progress()
+	_test_objective_lens_shares_birthplace_classification()
+	_test_objective_lens_shares_nursery_classification()
+	_test_objective_lens_cleans_up_markers_and_feedback()
 	_test_nursery_network_requires_three_live_groups()
 	_test_nursery_network_requires_food_presence_not_volume()
 	_test_first_hunt_requires_successful_predation()
@@ -34,8 +39,11 @@ func _initialize() -> void:
 	_test_first_recovery_supply_is_not_repeated()
 	_test_checkpoint_ui_uses_compact_live_progress()
 	_test_checkpoint_ui_maps_every_evidence_type()
+	_test_nursery_is_the_single_player_facing_term()
 	_test_checkpoint_ui_distinguishes_live_hunger_states()
+	_test_checkpoint_ui_explains_colony_stability_without_threshold_math()
 	_test_checkpoint_ui_stays_scan_first()
+	_test_checkpoint_hint_stays_stable_across_live_phases()
 	_test_minor_and_major_feedback_are_distinct()
 	_test_debug_retains_exact_evaluator_detail()
 	_test_completion_ui_and_sandbox_epilogue()
@@ -92,7 +100,9 @@ func _arrange_two_havens(systems, rabbit_count: int = 12) -> void:
 
 func _arrange_havens(systems, rabbit_count: int, haven_count: int) -> void:
 	_ensure_rabbits(systems, rabbit_count)
-	var centers := [Vector2(-230.0, -140.0), Vector2(230.0, -140.0)]
+	var centers := [Vector2(-230.0, -140.0)]
+	if haven_count >= 2:
+		centers.append(Vector2(230.0, -140.0))
 	if haven_count >= 3:
 		centers.append(Vector2(240.0, 180.0))
 	var ids: Array = systems.simulation.rabbits.keys()
@@ -259,6 +269,139 @@ func _test_birthplaces_require_three_separated_births() -> void:
 	systems.advance(0.3)
 	_expect(two_areas_blocked and systems.run_director.has_completed("birthplaces"), "Life Across the Meadow requires fresh births in three genuinely separated areas")
 
+func _test_objective_lens_tracks_newborn_identity_and_progress() -> void:
+	var config := _fast_config()
+	config["progression"]["milestones"][2]["criteria"][0]["minimum_age"] = 8.0
+	var systems = Systems.new(config)
+	systems.run_director.milestone_index = 1
+	systems.run_director._reset_milestone_evidence()
+	var first_id: int = systems.simulation.add_rabbit(Vector2(-20.0, 0.0), "birth")
+	var second_id: int = systems.simulation.add_rabbit(Vector2(20.0, 0.0), "birth")
+	var arrivals: Dictionary = systems.current_objective_lens()
+	var arrival_ids: Array[int] = []
+	for marker in arrivals["attention"]:
+		arrival_ids.append(int(marker["entity_id"]))
+
+	systems.run_director.milestone_index = 2
+	systems.run_director._reset_milestone_evidence()
+	var before_feed: Dictionary = systems.current_objective_lens()
+	var before_states := {}
+	for marker in before_feed["attention"]:
+		before_states[int(marker["entity_id"])] = str(marker["state"])
+	systems.run_director.record_creature_fed("rabbit", first_id, -1)
+	var after_feed: Dictionary = systems.current_objective_lens()
+	var after_feed_states := {}
+	for marker in after_feed["attention"]:
+		after_feed_states[int(marker["entity_id"])] = str(marker["state"])
+	systems.simulation.rabbits[first_id]["age"] = 9.0
+	var after_growth: Dictionary = systems.current_objective_lens()
+	var after_growth_states := {}
+	for marker in after_growth["attention"]:
+		after_growth_states[int(marker["entity_id"])] = str(marker["state"])
+	systems.simulation.kill_rabbit(second_id, "test")
+	var after_death: Dictionary = systems.current_objective_lens()
+	var death_ids: Array[int] = []
+	for marker in after_death["attention"]:
+		death_ids.append(int(marker["entity_id"]))
+	systems.run_director.milestone_index = 3
+	systems.run_director._reset_milestone_evidence()
+	var next_checkpoint: Dictionary = systems.current_objective_lens()
+
+	var valid: bool = bool(arrivals["active"]) \
+		and arrival_ids.has(first_id) and arrival_ids.has(second_id) \
+		and before_states.get(first_id) == "needs_food" and before_states.get(second_id) == "needs_food" \
+		and after_feed_states.get(first_id) == "growing" and after_feed_states.get(second_id) == "needs_food" \
+		and after_growth_states.get(first_id) == "satisfied" \
+		and death_ids == [first_id] and next_checkpoint["attention"].is_empty()
+	_expect(valid, "Objective Lens follows evaluator-owned newborn identity through needs-food, growing, satisfied, death, and checkpoint cleanup", str(after_growth_states))
+
+func _test_objective_lens_shares_birthplace_classification() -> void:
+	var systems = Systems.new(_fast_config())
+	systems.run_director.milestone_index = 3
+	systems.run_director._reset_milestone_evidence()
+	systems.simulation.add_rabbit(Vector2(0.0, 0.0), "birth")
+	var first: Dictionary = systems.current_objective_lens()
+	systems.simulation.add_rabbit(Vector2(130.0, 0.0), "birth")
+	var nearby: Dictionary = systems.current_objective_lens()
+	systems.simulation.add_rabbit(Vector2(270.0, 0.0), "birth")
+	systems.simulation.add_rabbit(Vector2(420.0, 0.0), "birth")
+	var separated: Dictionary = systems.current_objective_lens()
+	var progress: Dictionary = systems.current_objective_progress()
+	var birthplace_goal: Dictionary = progress["criteria"][0]
+	var nearby_event: Dictionary = nearby["events"][1]
+	var no_evaluator_constants := true
+	for marker in separated["evidence"]:
+		no_evaluator_constants = no_evaluator_constants and not marker.has("minimum_separation") and not marker.has("radius")
+	var ordinals: Array[int] = []
+	for marker in separated["evidence"]:
+		ordinals.append(int(marker["ordinal"]))
+	var valid: bool = first["evidence"].size() == 1 \
+		and str(first["events"][0]["state"]) == "established" \
+		and nearby["evidence"].size() == 1 \
+		and str(nearby_event["state"]) == "reinforced" and int(nearby_event["ordinal"]) == 1 \
+		and separated["evidence"].size() == int(birthplace_goal["current"]) \
+		and ordinals == [1, 2, 3] and no_evaluator_constants
+	_expect(valid, "Objective Lens uses the evaluator's exact established/reinforced birthplace classification without exposing its radius", str(separated))
+
+func _test_objective_lens_shares_nursery_classification() -> void:
+	var systems = Systems.new(_fast_config())
+	systems.run_director.milestone_index = 4
+	systems.run_director._reset_milestone_evidence()
+	_arrange_havens(systems, 12, 2)
+	var lens: Dictionary = systems.current_objective_lens()
+	var progress: Dictionary = systems.current_objective_progress()
+	var nursery_goal: Dictionary = progress["criteria"][0]
+	var ordinals: Array[int] = []
+	var semantic_markers := true
+	var no_evaluator_constants := true
+	for marker in lens["evidence"]:
+		ordinals.append(int(marker["ordinal"]))
+		semantic_markers = semantic_markers \
+			and str(marker.get("role", "")) == "nursery" \
+			and str(marker.get("label", "")) == "Nursery" \
+			and marker.get("position", Vector2.INF) != Vector2.INF
+		no_evaluator_constants = no_evaluator_constants \
+			and not marker.has("radius") \
+			and not marker.has("minimum_separation") \
+			and not marker.has("minimum_local_food") \
+			and not marker.has("food") \
+			and not marker.has("member_ids") \
+			and not marker.has("food_ids")
+	var valid: bool = lens["evidence"].size() == int(nursery_goal["current"]) \
+		and lens["events"].size() == lens["evidence"].size() \
+		and ordinals == [1, 2] and semantic_markers and no_evaluator_constants
+	_expect(valid, "Objective Lens marks exactly the live nurseries counted by progression without exposing evaluator thresholds", str(lens))
+
+func _test_objective_lens_cleans_up_markers_and_feedback() -> void:
+	var lens = Lens.new()
+	var active := {
+		"objective_id": "birthplaces",
+		"active": true,
+		"attention": [{"id": "young:1", "role": "offspring", "entity_kind": "rabbit", "entity_id": 1, "position": Vector2.ZERO, "state": "needs_food"}],
+		"evidence": [{"id": "area:0", "role": "birthplace", "position": Vector2.ZERO, "ordinal": 1, "state": "recorded"}],
+		"events": [{"id": "birth:0", "role": "birthplace", "position": Vector2.ZERO, "ordinal": 1, "state": "established"}],
+	}
+	lens.update(active, 0.1)
+	lens.update(active, 0.1)
+	var no_duplicate_feedback: bool = lens.feedback.size() == 1
+	var reset_evidence: Dictionary = active.duplicate(true)
+	reset_evidence["evidence_revision"] = 1
+	lens.update(reset_evidence, 0.01)
+	var reset_rearms_feedback: bool = lens.feedback.size() == 2
+	lens.update({"objective_id": "nursery_network", "active": true, "attention": [], "evidence": [], "events": []}, 0.05)
+	var old_marker_fading: bool = not lens.attention_markers.is_empty() and not lens.evidence_markers.is_empty()
+	lens.update({"objective_id": "nursery_network", "active": false}, 1.5)
+	var faded_cleanly: bool = lens.attention_markers.is_empty() and lens.evidence_markers.is_empty() and lens.feedback.is_empty()
+	lens.clear_immediately()
+	var reset_cleanly: bool = lens.objective_id.is_empty() and lens.seen_event_ids.is_empty()
+	_expect(no_duplicate_feedback and reset_rearms_feedback and old_marker_fading and faded_cleanly and reset_cleanly, "Objective Lens deduplicates evidence feedback and cleans up across evidence resets, checkpoint changes, inactive states, and restart", str({
+		"deduplicated": no_duplicate_feedback,
+		"reset_rearmed": reset_rearms_feedback,
+		"fading": old_marker_fading,
+		"faded": faded_cleanly,
+		"reset": reset_cleanly,
+	}))
+
 func _test_nursery_network_requires_three_live_groups() -> void:
 	var config := _fast_config()
 	config["progression"]["milestones"][4]["stabilization"] = 0.5
@@ -357,7 +500,7 @@ func _test_two_safe_havens_are_spatial_and_stable() -> void:
 	systems.advance(0.4)
 	var short_hold_rejected: bool = systems.run_director.current_milestone_id() == "two_safe_havens"
 	systems.advance(0.2)
-	_expect(stretched_rejected and transient_rejected and short_hold_rejected and systems.run_director.has_completed("two_safe_havens"), "Havens Under Pressure requires a hunt-renewal cycle plus two separated refuges that survive the hold", str({
+	_expect(stretched_rejected and transient_rejected and short_hold_rejected and systems.run_director.has_completed("two_safe_havens"), "Nurseries Under Pressure requires a hunt-renewal cycle plus two separated nurseries that survive the hold", str({
 		"stretched_rejected": stretched_rejected,
 		"transient_rejected": transient_rejected,
 		"short_hold_rejected": short_hold_rejected,
@@ -395,7 +538,7 @@ func _test_safe_haven_counter_supports_three_zones() -> void:
 		"minimum_separation": 280.0,
 		"minimum_local_food": 12.0,
 	})
-	_expect(bool(evidence["met"]) and int(evidence["separated_group_count"]) == 3, "Safe Haven evidence can count three mutually separated local nursery zones", str(evidence))
+	_expect(bool(evidence["met"]) and int(evidence["separated_group_count"]) == 3, "Nursery evidence can count three mutually separated local nursery zones", str(evidence))
 
 func _test_two_distinct_foxes_and_birth_are_required() -> void:
 	var systems = Systems.new(_fast_config())
@@ -410,7 +553,7 @@ func _test_two_distinct_foxes_and_birth_are_required() -> void:
 	var one_fox_blocked: bool = systems.run_director.current_milestone_id() == "predators_find_place"
 	systems.run_director.record_predation(fox_ids[1], systems.simulation.rabbits.keys()[2], Vector2.ZERO)
 	systems.advance(0.3)
-	_expect(one_fox_blocked and systems.run_director.has_completed("predators_find_place"), "Predators Find Their Place requires two distinct hunters, a complete recovery rhythm, safe havens, and enough prey per fox")
+	_expect(one_fox_blocked and systems.run_director.has_completed("predators_find_place"), "Predators Find Their Place requires two distinct hunters, a complete recovery rhythm, nurseries, and enough prey per fox")
 
 func _test_final_cycle_is_fresh_ordered_and_latched() -> void:
 	var config := _fast_config()
@@ -439,22 +582,25 @@ func _test_final_cycle_is_fresh_ordered_and_latched() -> void:
 
 func _test_reward_timing_and_persistent_expansions() -> void:
 	var systems = Systems.new(_fast_config())
+	var expansion_step := float(systems.config["world"]["expansion_amount"])
+	var initial_radius: float = systems.simulation.world_radius
 	var preserved_plant: int = systems.simulation.add_plant("carrot_patch", Vector2(120.0, 0.0))
 	_advance_to(systems, "nursery_network")
+	var early_reveals_ok: bool = systems.simulation.world_radius == initial_radius + expansion_step * 4.0
 	var before_major: float = systems.simulation.world_radius
 	_satisfy_current_checkpoint(systems)
-	var first_major_ok: bool = systems.simulation.world_radius == before_major + 145.0 and systems.run_director.is_unlocked("fox") and systems.inventory["fox"] == 2 and systems.run_director.supply_pool == "web"
+	var first_major_ok: bool = systems.simulation.world_radius == before_major + expansion_step and systems.run_director.is_unlocked("fox") and systems.inventory["fox"] == 2 and systems.run_director.supply_pool == "web"
 	_advance_to(systems, "life_returns")
 	var before_second: float = systems.simulation.world_radius
 	_satisfy_current_checkpoint(systems)
-	var second_major_ok: bool = systems.simulation.world_radius == before_second + 145.0
+	var second_major_ok: bool = systems.simulation.world_radius == before_second + expansion_step
 	_advance_to(systems, "predators_find_place")
 	var before_third: float = systems.simulation.world_radius
 	_satisfy_current_checkpoint(systems)
-	var third_major_ok: bool = systems.simulation.world_radius == before_third + 145.0 and systems.run_director.supply_pool == "living"
+	var third_major_ok: bool = systems.simulation.world_radius == before_third + expansion_step and systems.run_director.supply_pool == "living"
 	var after: float = systems.simulation.world_radius
 	systems.advance(0.5)
-	_expect(first_major_ok and second_major_ok and third_major_ok and after == 795.0 and systems.simulation.world_radius == after and systems.simulation.plants.has(preserved_plant), "major rewards occur at checkpoints 5, 7, and 9 exactly once without resetting the world")
+	_expect(early_reveals_ok and first_major_ok and second_major_ok and third_major_ok and after == initial_radius + expansion_step * 9.0 and systems.simulation.world_radius == after and systems.simulation.plants.has(preserved_plant), "every completed checkpoint reveals one persistent terrain step while major rewards still occur at checkpoints 5, 7, and 9")
 
 func _test_supply_pool_progression() -> void:
 	var config := Config.make()
@@ -650,7 +796,11 @@ func _test_checkpoint_ui_maps_every_evidence_type() -> void:
 				if goal_type == "health":
 					expected_value = {"fed": "Fed", "hungry": "Hungry", "starving": "Starving", "absent": "—"}.get(str(goal["status"]), "—")
 				elif goal_type == "trend":
-					expected_value = "%d/%d%% max" % [int(goal["current"]), int(goal["target"])]
+					expected_value = {
+						"stable": "Stable",
+						"under_pressure": "Under pressure",
+						"falling": "Falling fast",
+					}.get(str(goal["status"]), "Stable" if bool(goal["met"]) else "Falling fast")
 				mapped = mapped and row["value"].text == expected_value
 				if str(goal["type"]) == "fox_population":
 					mapped = mapped and row["glyph"] != null and row["glyph"].kind == "fox"
@@ -658,6 +808,62 @@ func _test_checkpoint_ui_maps_every_evidence_type() -> void:
 		mapped = mapped and hud.objective_progress_view.goal_rows.has("hold")
 		hud.free()
 	_expect(mapped, "checkpoint UI maps every structured checkpoint goal into the task/status list", "; ".join(observed))
+
+func _test_nursery_is_the_single_player_facing_term() -> void:
+	var player_copy: Array[String] = []
+	for milestone_value in Config.make()["progression"]["milestones"]:
+		var milestone: Dictionary = milestone_value
+		for field in ["title", "summary", "guidance", "teaser", "completion_message"]:
+			player_copy.append(str(milestone.get(field, "")))
+		for label in milestone.get("labels", {}).values():
+			player_copy.append(str(label))
+		for criterion_value in milestone.get("criteria", []):
+			var criterion: Dictionary = criterion_value
+			for field in ["label", "metric_label", "lens_label"]:
+				player_copy.append(str(criterion.get(field, "")))
+	var hud = HUD.new()
+	var late_nursery_coach: Dictionary = hud._qualitative_objective_coach("two_safe_havens", "evidence", "playing")
+	player_copy.append(str(late_nursery_coach.get("title", "")))
+	player_copy.append(str(late_nursery_coach.get("detail", "")))
+	hud.free()
+	var joined := " ".join(player_copy).to_lower()
+	_expect("nurser" in joined and not "haven" in joined, "player-facing progression consistently calls every viable rabbit group a nursery", joined)
+
+func _test_checkpoint_ui_explains_colony_stability_without_threshold_math() -> void:
+	var config := _fast_config()
+	config["progression"]["milestones"][6]["severe_decline_fraction"] = 0.38
+	var systems = Systems.new(config)
+	systems.run_director.milestone_index = 6
+	_ensure_rabbits(systems, 10)
+	_ensure_foxes(systems, 1)
+	var hud = HUD.new()
+	root.add_child(hud)
+	hud.setup(systems)
+	systems.advance(1.1)
+	hud.refresh()
+	var trend_row: Dictionary = hud.objective_progress_view.goal_rows["rabbit_trend"]
+	var stable: bool = trend_row["title"].text == "Colony stability" \
+		and trend_row["value"].text == "Stable"
+
+	var rabbit_ids: Array = systems.simulation.rabbits.keys()
+	for index in range(3):
+		systems.simulation.kill_rabbit(rabbit_ids[index], "predation")
+	systems.advance(1.1)
+	hud.refresh()
+	var under_pressure: bool = trend_row["value"].text == "Under pressure" \
+		and trend_row["value"].theme_type_variation == "LabelWarning"
+
+	systems.simulation.kill_rabbit(rabbit_ids[3], "predation")
+	systems.advance(1.1)
+	hud.refresh()
+	var falling: bool = trend_row["value"].text == "Falling fast" \
+		and trend_row["value"].theme_type_variation == "LabelDanger" \
+		and "checkpoint is paused" in trend_row["value"].tooltip_text.to_lower()
+	var hides_threshold_math: bool = "%" not in trend_row["value"].text \
+		and "/" not in trend_row["value"].text \
+		and "%" not in trend_row["value"].tooltip_text
+	_expect(stable and under_pressure and falling and hides_threshold_math, "checkpoint UI translates the rabbit-loss threshold into plain colony-stability states", trend_row["value"].text)
+	hud.free()
 
 func _test_checkpoint_ui_distinguishes_live_hunger_states() -> void:
 	var systems = Systems.new(_fast_config())
@@ -714,10 +920,66 @@ func _test_checkpoint_ui_stays_scan_first() -> void:
 	_expect(hint_available and next_action_visible and compact_value and hint_open and hint_closed, "checkpoint UI keeps optional guidance beside compact goal rows", row_value)
 	hud.free()
 
+func _test_checkpoint_hint_stays_stable_across_live_phases() -> void:
+	var config := _fast_config()
+	config["progression"]["milestones"][4]["stabilization"] = 999.0
+	var systems = Systems.new(config)
+	systems.run_director.milestone_index = 4
+	systems.run_director._reset_milestone_evidence()
+	var hud = HUD.new()
+	root.add_child(hud)
+	hud.setup(systems)
+
+	_arrange_havens(systems, 12, 2)
+	hud.refresh()
+	var evidence_phase := str(systems.current_objective_progress()["phase"])
+	var action_with_two: String = hud.objective_progress_view.next_label.text
+	hud.objective_progress_view.details_button.pressed.emit()
+	var initial_hint: String = hud.objective_progress_view.details_detail.text
+
+	_arrange_havens(systems, 12, 3)
+	hud.refresh()
+	var stabilizing_phase := str(systems.current_objective_progress()["phase"])
+	var action_with_three: String = hud.objective_progress_view.next_label.text
+	var hint_with_three: String = hud.objective_progress_view.details_detail.text
+	var stayed_open_with_three: bool = hud.objective_progress_view.details_box.visible
+
+	_arrange_havens(systems, 12, 2)
+	hud.refresh()
+	var returned_phase := str(systems.current_objective_progress()["phase"])
+	var returned_hint: String = hud.objective_progress_view.details_detail.text
+	var stayed_open_after_return: bool = hud.objective_progress_view.details_box.visible
+
+	var stable_definition: bool = initial_hint == hint_with_three \
+		and hint_with_three == returned_hint \
+		and "A nursery has at least three rabbits" in initial_hint \
+		and hud.objective_progress_view.details_detail.get_parent() == hud.objective_progress_view.details_box
+	var live_coaching_changed: bool = action_with_two != action_with_three \
+		and "1 more nursery" in action_with_two \
+		and action_with_three == "Let the pattern settle."
+	_expect(
+		evidence_phase == "evidence" and stabilizing_phase == "stabilizing" and returned_phase == "evidence" \
+			and stable_definition and live_coaching_changed and stayed_open_with_three and stayed_open_after_return,
+		"checkpoint hints remain objective-scoped while TRY THIS responds to live nursery phases",
+		str({
+			"phases": [evidence_phase, stabilizing_phase, returned_phase],
+			"hints": [initial_hint, hint_with_three, returned_hint],
+			"actions": [action_with_two, action_with_three],
+			"open": [stayed_open_with_three, stayed_open_after_return],
+		})
+	)
+	hud.free()
+
 func _test_debug_retains_exact_evaluator_detail() -> void:
 	var systems = Systems.new(_fast_config())
 	var debug_text := "\n".join(systems.run_director.debug_lines(systems.simulation))
-	_expect("stable 0.0s/0.2s" in debug_text and "founders fed 0" in debug_text and "grace 0.0s" in debug_text, "development debug retains exact evidence, stabilization, and Critical timing")
+	systems.run_director.milestone_index = 6
+	var predator_debug_text := "\n".join(systems.run_director.debug_lines(systems.simulation))
+	_expect(
+		"stable 0.0s/0.2s" in debug_text and "founders fed 0" in debug_text and "grace 0.0s" in debug_text \
+			and "Trend rabbit loss 0% · limit 110% · window 16s" in predator_debug_text,
+		"development debug retains exact evidence, stabilization, trend, and Critical timing"
+	)
 
 func _test_minor_and_major_feedback_are_distinct() -> void:
 	var systems = Systems.new(_fast_config())

@@ -16,7 +16,6 @@ var next_heading: Label
 var next_label: Label
 var next_detail_label: Label
 var details_box: VBoxContainer
-var details_scroll: ScrollContainer
 var details_detail: Label
 var details_teaser: Label
 
@@ -24,13 +23,14 @@ func configure() -> BiomeCheckpointProgress:
 	add_theme_constant_override("separation", ThemeSystem.SPACE.small)
 
 	info_row = HBoxContainer.new()
-	info_row.alignment = BoxContainer.ALIGNMENT_END
+	info_row.alignment = BoxContainer.ALIGNMENT_BEGIN
 	info_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	add_child(info_row)
 	details_button = Button.new()
 	details_button.text = "Need a hint?"
 	details_button.theme_type_variation = "CheckpointInfoButton"
-	details_button.custom_minimum_size = Vector2(104.0, 32.0)
+	details_button.custom_minimum_size = Vector2(0.0, 36.0)
+	details_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	details_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	details_button.focus_mode = Control.FOCUS_ALL
 	details_button.pressed.connect(_toggle_details)
 	info_row.add_child(details_button)
@@ -60,6 +60,7 @@ func configure() -> BiomeCheckpointProgress:
 	next_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	next_detail_label.visible = false
 	add_child(next_detail_label)
+	add_child(info_row)
 
 	details_box = VBoxContainer.new()
 	details_box.visible = false
@@ -71,15 +72,10 @@ func configure() -> BiomeCheckpointProgress:
 	details_box.add_child(divider_details)
 	var details_heading := _label("A LITTLE NUDGE", "Eyebrow")
 	details_box.add_child(details_heading)
-	details_scroll = ScrollContainer.new()
-	details_scroll.custom_maximum_size.y = 120.0
-	details_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	details_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	details_box.add_child(details_scroll)
 	details_detail = _label("", "BodySecondary")
 	details_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	details_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	details_scroll.add_child(details_detail)
+	details_box.add_child(details_detail)
 	details_teaser = _label("", "Caption")
 	details_teaser.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	details_box.add_child(details_teaser)
@@ -120,8 +116,6 @@ func set_details_open(open: bool) -> void:
 		return
 	details_box.visible = open
 	details_button.text = "Hide hint" if open else "Need a hint?"
-	if open:
-		details_scroll.scroll_vertical = 0
 	details_toggled.emit(open)
 
 func _toggle_details() -> void:
