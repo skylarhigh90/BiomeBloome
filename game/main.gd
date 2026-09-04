@@ -257,10 +257,12 @@ func _select_debug_entity(position: Vector2) -> void:
 
 func _update_debug_panel() -> void:
 	var sim := systems.simulation
+	var forage: Dictionary = sim.ecosystem_forage_budget()
 	var lines: Array[String] = [
 		"DEBUG · F3 to close · click an animal",
 		"Fixed tick: %.1f Hz   Speed: %.0f×" % [1.0 / config["simulation"]["fixed_step"], systems.simulation_speed],
 		"Rabbits: %d   Foxes: %d   Plants: %d" % [sim.rabbits.size(), sim.foxes.size(), sim.plants.size()],
+		"Forage capacity: %.1f rabbits   Stock: %d%%" % [forage["sustainable_rabbits"], roundi(float(forage["stock_ratio"]) * 100.0)],
 		"Seed: %d   Sim time: %.1fs" % [config["simulation"]["seed"], sim.simulation_time],
 	]
 	lines.append_array(systems.run_director.debug_lines(systems.simulation))
@@ -271,12 +273,12 @@ func _update_debug_panel() -> void:
 			world_view.set_debug_selection("", -1)
 		else:
 			lines.append("%s #%d · %s" % [debug_selected_kind.capitalize(), data["id"], data["behavior"]])
-			lines.append("Hunger %.1f · Age %.1f · Cooldown %.1f" % [data["hunger"], data["age"], data["reproduction_cooldown"]])
+			lines.append("Hunger %.1f · Starve debt %.1f · Age %.1f · Cooldown %.1f" % [data["hunger"], data["starvation_time"], data["age"], data["reproduction_cooldown"]])
 			if debug_selected_kind == "rabbit":
-				lines.append("Target %s · Local food %d · Shared food %d" % [str(data["target_id"]), int(data["nearby"]["food"]), int(data["nearby"]["shared_food"])])
+				lines.append("Target %s · Local food %d · Shared food %d · Flee %.1f" % [str(data["target_id"]), int(data["nearby"]["food"]), int(data["nearby"]["shared_food"]), data["flee_stamina"]])
 				lines.append("Social group %d · Nearby foxes %d" % [int(data["nearby"]["social_group"]), int(data["nearby"]["predators"])])
 			else:
-				lines.append("Target %s · Nearby prey %d" % [str(data["target_id"]), int(data["nearby"]["prey"])])
+				lines.append("Target %s · Nearby prey %d · Sprint %.1f · Learned %d" % [str(data["target_id"]), int(data["nearby"]["prey"]), data["sprint_stamina"], int(data["failed_pursuits"])])
 			var terrain_data: Dictionary = data["terrain"]
 			lines.append("Terrain M %.2f · W %.2f · T %.2f · Water %.2f" % [terrain_data["meadow"], terrain_data["woodland"], terrain_data["thicket"], terrain_data["water"]])
 			lines.append("Route %.1f direct %.1f · waypoints %d · ford %s" % [data["route_distance"], data["route_direct_distance"], data["route_waypoints"].size(), str(data["route_ford"])])

@@ -1,7 +1,7 @@
 extends SceneTree
 
 ## Reproducible live-simulation trials for the V0.4 manual playtest layouts.
-## These complement unit-style terrain assertions; the normal ten-checkpoint
+## These complement unit-style terrain assertions; the normal progression
 ## playthrough remains in playtest_runner.gd.
 
 const Config = preload("res://config/game_config.gd")
@@ -102,7 +102,9 @@ func _colony_trial(with_thicket: bool) -> Dictionary:
 	var refuge_ticks := 0
 	var hunting_ticks := 0
 	var rabbit_survival_seconds := 0.0
-	for _tick in range(600):
+	# Cover more than one post-meal hunger cycle so the slower sustainable Fox
+	# metabolism still leaves room for refuge geography to change outcomes.
+	for _tick in range(1000):
 		sim.step(0.1)
 		rabbit_survival_seconds += float(sim.population("rabbit")) * 0.1
 		for rabbit in sim.rabbits.values():

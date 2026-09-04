@@ -5,7 +5,7 @@ signal details_toggled(open: bool)
 
 const Glyph = preload("res://ui/entity_glyph.gd")
 const ThemeSystem = preload("res://ui/theme/biome_theme.gd")
-const VALUE_WIDTH := 132.0
+const VALUE_WIDTH := 112.0
 
 var info_row: HBoxContainer
 var details_button: Button
@@ -16,8 +16,15 @@ var next_heading: Label
 var next_label: Label
 var next_detail_label: Label
 var details_box: VBoxContainer
+var details_heading: Label
+var details_title: Label
+var details_behavior: Label
 var details_detail: Label
 var details_teaser: Label
+var guide_overview := ""
+var guide_teaser := ""
+var goal_help: Dictionary = {}
+var selected_help_id := ""
 
 func configure() -> BiomeCheckpointProgress:
 	add_theme_constant_override("separation", ThemeSystem.SPACE.small)
@@ -26,7 +33,7 @@ func configure() -> BiomeCheckpointProgress:
 	info_row.alignment = BoxContainer.ALIGNMENT_BEGIN
 	info_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	details_button = Button.new()
-	details_button.text = "Need a hint?"
+	details_button.text = "How progress works"
 	details_button.theme_type_variation = "CheckpointInfoButton"
 	details_button.custom_minimum_size = Vector2(0.0, 36.0)
 	details_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -51,7 +58,7 @@ func configure() -> BiomeCheckpointProgress:
 	divider.theme_type_variation = "CheckpointDivider"
 	divider.custom_minimum_size.y = ThemeSystem.SPACE.small
 	add_child(divider)
-	next_heading = _label("TRY THIS", "Eyebrow")
+	next_heading = _label("NEXT MOVE · UPDATES LIVE", "Eyebrow")
 	add_child(next_heading)
 	next_label = _label("Watch the ecosystem.", "Body")
 	next_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -70,8 +77,15 @@ func configure() -> BiomeCheckpointProgress:
 	divider_details.theme_type_variation = "CheckpointDivider"
 	divider_details.custom_minimum_size.y = ThemeSystem.SPACE.small
 	details_box.add_child(divider_details)
-	var details_heading := _label("A LITTLE NUDGE", "Eyebrow")
+	details_heading = _label("CHECKPOINT GUIDE", "Eyebrow")
 	details_box.add_child(details_heading)
+	details_title = _label("How progress works", "LabelStrong")
+	details_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	details_box.add_child(details_title)
+	details_behavior = _label("", "EyebrowAccent")
+	details_behavior.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	details_behavior.visible = false
+	details_box.add_child(details_behavior)
 	details_detail = _label("", "BodySecondary")
 	details_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	details_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -100,14 +114,24 @@ func set_details(summary: String, detail: String, teaser: String) -> void:
 	set_guidance(detail if not detail.is_empty() else summary, teaser)
 
 func set_guidance(guidance: String, teaser: String = "") -> void:
-	details_detail.text = guidance
-	details_detail.visible = not guidance.is_empty()
-	details_teaser.text = "LOOK FOR · %s" % teaser if not teaser.is_empty() else ""
-	details_teaser.visible = not teaser.is_empty()
-	details_button.visible = not guidance.is_empty()
+	set_goal_guide(guidance, {}, teaser)
+
+## Checkpoint guidance is reference material, not reactive coaching. Entries are
+## keyed by rendered goal ID so every row can explain itself regardless of which
+## goal currently blocks progress.
+func set_goal_guide(overview: String, entries: Dictionary, teaser: String = "") -> void:
+	guide_overview = overview
+	guide_teaser = teaser
+	goal_help = entries.duplicate(true)
+	if not selected_help_id.is_empty() and not goal_help.has(selected_help_id):
+		selected_help_id = ""
+	_sync_help_buttons()
+	if details_box.visible:
+		_render_details()
+	details_button.visible = not guide_overview.is_empty() or not goal_help.is_empty()
 	info_row.visible = details_button.visible
-	details_button.tooltip_text = guidance
-	if guidance.is_empty():
+	details_button.tooltip_text = "A stable guide to goal rules and which progress can change."
+	if not details_button.visible:
 		set_details_open(false)
 
 func set_details_open(open: bool) -> void:
@@ -115,11 +139,17 @@ func set_details_open(open: bool) -> void:
 	if details_box.visible == open:
 		return
 	details_box.visible = open
-	details_button.text = "Hide hint" if open else "Need a hint?"
+	if open:
+		_render_details()
+	details_button.text = "Hide checkpoint guide" if open else "How progress works"
 	details_toggled.emit(open)
 
 func _toggle_details() -> void:
-	set_details_open(not details_box.visible)
+	if details_box.visible:
+		set_details_open(false)
+		return
+	selected_help_id = ""
+	set_details_open(true)
 
 func set_hold_progress(ratio: float, semantic_state: String, visible: bool = true) -> void:
 	progress_bar.visible = visible
@@ -158,12 +188,22 @@ func _rebuild_rows(rows: Array[Dictionary]) -> void:
 		value.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		row.add_child(value)
 
+		var help_button := Button.new()
+		help_button.text = "?"
+		help_button.theme_type_variation = "CheckpointInfoIconButton"
+		help_button.custom_minimum_size = Vector2(28.0, 28.0)
+		help_button.focus_mode = Control.FOCUS_ALL
+		help_button.pressed.connect(_show_goal_help.bind(row_id))
+		row.add_child(help_button)
+
 		goal_rows[row_id] = {
 			"container": row,
 			"glyph": glyph,
 			"title": title,
 			"value": value,
+			"help_button": help_button,
 		}
+	_sync_help_buttons()
 
 func _update_row(row_data: Dictionary) -> void:
 	var row_id := str(row_data["id"])
@@ -179,8 +219,51 @@ func _update_row(row_data: Dictionary) -> void:
 	controls["container"].tooltip_text = tooltip
 	controls["title"].tooltip_text = tooltip
 	controls["value"].tooltip_text = tooltip
+	var help_button: Button = controls["help_button"]
+	help_button.visible = goal_help.has(row_id)
+	help_button.tooltip_text = "Explain %s" % str(row_data.get("label", "this goal"))
 	if controls["glyph"] != null:
 		controls["glyph"].set_muted(false)
+
+func _sync_help_buttons() -> void:
+	for row_id in goal_rows:
+		var controls: Dictionary = goal_rows[row_id]
+		var help_button: Button = controls["help_button"]
+		help_button.visible = goal_help.has(str(row_id))
+		if help_button.visible:
+			help_button.tooltip_text = "Explain %s" % controls["title"].text
+
+func _show_goal_help(row_id: String) -> void:
+	if not goal_help.has(row_id):
+		return
+	if details_box.visible and selected_help_id == row_id:
+		set_details_open(false)
+		return
+	selected_help_id = row_id
+	_render_details()
+	if details_box.visible:
+		details_toggled.emit(true)
+	else:
+		set_details_open(true)
+
+func _render_details() -> void:
+	if not selected_help_id.is_empty() and goal_help.has(selected_help_id):
+		var entry: Dictionary = goal_help[selected_help_id]
+		details_heading.text = "GOAL EXPLAINER"
+		details_title.text = str(entry.get("title", "Goal"))
+		details_behavior.text = str(entry.get("behavior", ""))
+		details_behavior.visible = not details_behavior.text.is_empty()
+		details_detail.text = str(entry.get("detail", ""))
+		details_teaser.visible = false
+	else:
+		details_heading.text = "CHECKPOINT GUIDE"
+		details_title.text = "How progress works"
+		details_behavior.text = ""
+		details_behavior.visible = false
+		details_detail.text = guide_overview
+		details_teaser.text = "UP NEXT · %s" % guide_teaser if not guide_teaser.is_empty() else ""
+		details_teaser.visible = not guide_teaser.is_empty()
+	details_detail.visible = not details_detail.text.is_empty()
 
 func _current_row_ids() -> Array[String]:
 	var ids: Array[String] = []

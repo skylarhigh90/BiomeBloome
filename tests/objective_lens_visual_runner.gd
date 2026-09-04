@@ -66,7 +66,7 @@ func _prepare_scene() -> void:
 	game.world_view.queue_redraw()
 
 func _prepare_newborns() -> void:
-	game.systems.run_director.milestone_index = 2
+	game.systems.run_director.milestone_index = 1
 	game.systems.run_director._reset_milestone_evidence()
 	var adult_positions := [
 		Vector2(-170.0, -78.0), Vector2(-118.0, 35.0), Vector2(-42.0, -104.0),
@@ -91,7 +91,7 @@ func _prepare_newborns() -> void:
 	print("Newborn Lens: amber needs food, teal has fed/is growing, green check has satisfied the criterion.")
 
 func _prepare_birthplaces() -> void:
-	game.systems.run_director.milestone_index = 3
+	game.systems.run_director.milestone_index = 1
 	game.systems.run_director._reset_milestone_evidence()
 	birthplace_positions = [
 		_ground_near(Vector2(-185.0, -92.0)),
@@ -108,7 +108,7 @@ func _prepare_birthplaces() -> void:
 	print("Birthplace Lens: birth 2 reinforces area 1; later separated births establish areas 2 and 3.")
 
 func _prepare_nurseries() -> void:
-	game.systems.run_director.milestone_index = 4
+	game.systems.run_director.milestone_index = 2
 	game.systems.run_director._reset_milestone_evidence()
 	var nursery_center := _ground_near(Vector2(155.0, -62.0))
 	for offset in [Vector2(-19.0, -8.0), Vector2(17.0, -10.0), Vector2(0.0, 18.0)]:

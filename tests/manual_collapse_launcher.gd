@@ -13,8 +13,8 @@ func _stage_collapse_scenario() -> void:
 	await process_frame
 	var systems = game.systems
 	var director = systems.run_director
-	director.milestone_index = director.milestone_position("first_hunt")
-	director.completed_milestones = ["colony_gathers", "new_arrivals", "young_foragers", "birthplaces", "nursery_network"]
+	director.milestone_index = director.milestone_position("predators_find_place")
+	director.completed_milestones = ["colony_gathers", "new_arrivals", "nursery_network"]
 	director.rabbit_failure_armed = true
 	director.supply_pool = "web"
 	director.unlocked["fox"] = true

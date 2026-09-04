@@ -1,19 +1,22 @@
 extends SceneTree
 
 ## Manual narrow-viewport checkpoint capture. Run with:
-##   godot --path . --resolution 376x900 --script tests/checkpoint_visual_runner.gd -- 7 /tmp/checkpoint-7.png
+##   godot --path . --resolution 376x900 --script tests/checkpoint_visual_runner.gd -- 5 /tmp/checkpoint-5.png living_cycle
 
 var game
 var frames := 0
 var checkpoint_number := 5
 var output_path := "/private/tmp/biome-checkpoint.png"
+var explained_goal_id := ""
 
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	if not args.is_empty():
-		checkpoint_number = clampi(int(args[0]), 1, 10)
+		checkpoint_number = clampi(int(args[0]), 1, 5)
 	if args.size() > 1:
 		output_path = str(args[1])
+	if args.size() > 2:
+		explained_goal_id = str(args[2])
 	root.content_scale_size = Vector2i(376, 900)
 	game = load("res://game/main.tscn").instantiate()
 	root.add_child(game)
@@ -47,6 +50,8 @@ func _prepare_checkpoint() -> void:
 	for index in range(int(milestone.get("fox_min", 0))):
 		game.systems.simulation.add_fox(Vector2(120.0 + float(index) * 35.0, 0.0), "visual_test")
 	game.hud.refresh()
+	if not explained_goal_id.is_empty() and game.hud.objective_progress_view.goal_rows.has(explained_goal_id):
+		game.hud.objective_progress_view.goal_rows[explained_goal_id]["help_button"].pressed.emit()
 	for control in [game.hud.population_panel, game.hud.supply_panel, game.hud.inventory_panel, game.hud.speed_panel, game.hud.restart_button]:
 		control.visible = false
 	game.world_view.queue_redraw()

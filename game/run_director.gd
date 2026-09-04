@@ -32,12 +32,14 @@ var milestone_fed_rabbit_ids: Dictionary = {}
 var milestone_fed_born_rabbit_ids: Dictionary = {}
 var milestone_fed_fox_ids: Dictionary = {}
 var milestone_born_rabbit_ids: Dictionary = {}
+var milestone_birth_event_indices: Dictionary = {}
 var milestone_birth_positions: Array[Vector2] = []
 var milestone_evidence_revision := 0
 var placed_rabbit_ids: Dictionary = {}
 var born_rabbit_ids: Dictionary = {}
 var sequence_progress := 0
 var sequence_started_at := -1.0
+var sequence_started_event_index := -1
 var sequence_completed := false
 var last_safe_haven_groups: Array = []
 var spatial_evidence_cache: Dictionary = {}
@@ -101,6 +103,7 @@ func record_entity_added(kind: String, entity_id: int, reason: String, position:
 		if run_state == STATE_PLAYING:
 			milestone_rabbit_births += 1
 			milestone_born_rabbit_ids[entity_id] = true
+			milestone_birth_event_indices[entity_id] = milestone_events.size()
 			if position != Vector2.INF:
 				milestone_birth_positions.append(position)
 			_record_ecology_event("birth", entity_id)
@@ -564,10 +567,13 @@ func _criterion_progress(criterion: Dictionary, milestone: Dictionary, simulatio
 func _born_rabbit_feeding_evidence(criterion: Dictionary, milestone: Dictionary, simulation: EcosystemSimulation) -> Dictionary:
 	var eligible_ids: Dictionary = milestone_born_rabbit_ids if bool(criterion.get("fresh_only", false)) else born_rabbit_ids
 	var minimum_age := float(criterion.get("minimum_age", milestone.get("born_survival_age", 0.0)))
+	var after_sequence_start := bool(criterion.get("after_sequence_start", false))
 	var current := 0
 	var subjects: Array = []
 	for entity_id in eligible_ids:
 		if not simulation.rabbits.has(entity_id):
+			continue
+		if after_sequence_start and not _birth_followed_sequence_start(int(entity_id)):
 			continue
 		var rabbit: Dictionary = simulation.rabbits[entity_id]
 		var has_fed := milestone_fed_born_rabbit_ids.has(entity_id)
@@ -584,6 +590,10 @@ func _born_rabbit_feeding_evidence(criterion: Dictionary, milestone: Dictionary,
 		"current": current,
 		"subjects": subjects,
 	}
+
+func _birth_followed_sequence_start(entity_id: int) -> bool:
+	return sequence_started_event_index >= 0 \
+		and int(milestone_birth_event_indices.get(entity_id, -1)) > sequence_started_event_index
 
 func _milestone_goal_progress(milestone: Dictionary, simulation: EcosystemSimulation, criterion_progress: Array, trend_met: bool) -> Array:
 	var goals: Array = []
@@ -782,12 +792,14 @@ func _reset_milestone_evidence() -> void:
 	milestone_fed_born_rabbit_ids.clear()
 	milestone_fed_fox_ids.clear()
 	milestone_born_rabbit_ids.clear()
+	milestone_birth_event_indices.clear()
 	milestone_birth_positions.clear()
 	spatial_evidence_cache.clear()
 	spatial_evidence_cache_key = ""
 	spatial_evidence_sampled_at = -INF
 	sequence_progress = 0
 	sequence_started_at = -1.0
+	sequence_started_event_index = -1
 	sequence_completed = false
 	last_safe_haven_groups.clear()
 
@@ -807,6 +819,7 @@ func _advance_sequence(event_type: String, milestone: Dictionary) -> void:
 	if sequence_progress < target.size() and event_type == str(target[sequence_progress]):
 		if sequence_progress == 0:
 			sequence_started_at = clock_time
+			sequence_started_event_index = milestone_events.size() - 1
 		sequence_progress += 1
 		if sequence_progress >= target.size():
 			sequence_completed = true
@@ -822,6 +835,7 @@ func _expire_sequence(milestone: Dictionary) -> void:
 	if window > 0.0 and clock_time - sequence_started_at > window:
 		sequence_progress = 0
 		sequence_started_at = -1.0
+		sequence_started_event_index = -1
 
 func _update_trend(delta: float, simulation: EcosystemSimulation) -> void:
 	trend_sample_elapsed += delta

@@ -13,6 +13,7 @@ const ThemeSystem = preload("res://ui/theme/biome_theme.gd")
 const HUDStat = preload("res://ui/components/hud_stat.gd")
 const HUDStatus = preload("res://ui/components/hud_status.gd")
 const CheckpointProgress = preload("res://ui/components/checkpoint_progress.gd")
+const MAX_CHECKPOINT_GOAL_ROWS := 5
 const InventoryCard = preload("res://ui/components/inventory_card.gd")
 const RewardChoiceCard = preload("res://ui/components/reward_choice_card.gd")
 const IconTextButton = preload("res://ui/components/icon_text_button.gd")
@@ -556,9 +557,17 @@ func _refresh_rabbit_hunger() -> void:
 		rabbit_hunger_label.theme_type_variation = "LabelSecondary"
 		rabbit_hunger_label.tooltip_text = "Hungry rabbits have found forage and are moving toward it."
 	else:
-		rabbit_hunger_label.text = "Well fed"
-		rabbit_hunger_label.theme_type_variation = "LabelSuccess"
-		rabbit_hunger_label.tooltip_text = "Hunger warnings appear here before rabbits begin starving."
+		var forage: Dictionary = systems.simulation.ecosystem_forage_budget()
+		var supported := int(floor(float(forage["sustainable_rabbits"])))
+		var births_paused := int(summary["population"]) >= supported or float(forage["stock_ratio"]) < float(systems.config["rabbit"]["reproduction_min_stock_ratio"])
+		if births_paused:
+			rabbit_hunger_label.text = "Forage full · births paused"
+			rabbit_hunger_label.theme_type_variation = "LabelSecondary"
+			rabbit_hunger_label.tooltip_text = "The renewable forage is supporting its current limit. Add a well-placed carrot patch or berry bush to make room for young."
+		else:
+			rabbit_hunger_label.text = "Well fed · room for young"
+			rabbit_hunger_label.theme_type_variation = "LabelSuccess"
+			rabbit_hunger_label.tooltip_text = "Local food is stocked and renewable forage can support more rabbits."
 	var previous_rank := _hunger_state_rank(last_rabbit_hunger_state)
 	var current_rank := _hunger_state_rank(state)
 	if not last_rabbit_hunger_state.is_empty() and (current_rank > previous_rank or starving_count > last_rabbit_starving_count):
@@ -654,15 +663,17 @@ func _refresh_objective() -> void:
 			"Return to the current checkpoint once the lineage recovers."
 		)
 	else:
-		objective_progress_view.set_goals(_checkpoint_goals(objective, progress))
+		var goal_rows := _checkpoint_goals(objective, progress)
+		objective_progress_view.set_goal_guide(
+			_checkpoint_guide_overview(objective),
+			_checkpoint_goal_help(objective, goal_rows),
+			str(objective.get("teaser", "Keep watching the web."))
+		)
+		objective_progress_view.set_goals(goal_rows)
 		var hold_target := maxf(0.001, float(progress["stability_target"]))
 		var hold_ratio := clampf(float(progress["stability_elapsed"]) / hold_target, 0.0, 1.0)
 		var hold_state := "success" if hold_ratio >= 1.0 else ("warning" if bool(progress["hold_active"]) else _checkpoint_semantic_state(state, phase))
 		objective_progress_view.set_hold_progress(hold_ratio, hold_state, true)
-		objective_progress_view.set_guidance(
-			_checkpoint_hint(objective),
-			str(objective.get("teaser", "Keep watching the web."))
-		)
 	objective_progress_view.set_next(str(coach["title"]), str(coach["detail"]))
 	_update_objective_layout("goals:%s:%s" % [str(objective["id"]), phase])
 
@@ -673,8 +684,9 @@ func _checkpoint_goals(_objective: Dictionary, progress: Dictionary) -> Array[Di
 		var goal_type := str(goal.get("type", ""))
 		var met := bool(goal.get("met", false))
 		if goal_type == "ordered_cycle":
-			rows.append_array(_ordered_cycle_rows(goal, progress))
+			rows.append(_ordered_cycle_row(goal, progress, _objective))
 			continue
+		var row_id := str(goal.get("id", goal_type))
 		var title := _player_goal_label(goal)
 		var value := "%d/%d %s" % [int(goal.get("current", 0)), int(goal.get("target", 1)), _goal_unit(goal_type)]
 		var state := "success" if met else str(goal.get("unmet_state", "warning"))
@@ -706,42 +718,53 @@ func _checkpoint_goals(_objective: Dictionary, progress: Dictionary) -> Array[Di
 			}.get(trend_status, "success" if met else "danger")
 		var kind := str(goal.get("kind", ""))
 		rows.append({
-			"id": str(goal.get("id", goal_type)),
+			"id": row_id,
 			"label": title,
 			"value": value,
 			"kind": kind,
 			"state": state,
-			"tooltip": str(goal.get("tooltip", "")),
+			"tooltip": _goal_tooltip(_objective, row_id, str(goal.get("tooltip", ""))),
 		})
 
 	var hold_elapsed := float(progress["stability_elapsed"])
 	var hold_target := float(progress["stability_target"])
 	rows.append({
 		"id": "hold",
-		"label": "Hold",
+		"label": "All goals together",
 		"value": _format_hold_value(hold_elapsed, hold_target),
-			"kind": "",
+		"kind": "",
 		"state": "success" if hold_elapsed + 0.0001 >= hold_target else ("warning" if bool(progress["hold_active"]) else "normal"),
+		"tooltip": _goal_tooltip(_objective, "hold"),
 	})
-	return rows
+	# A compact checkpoint is a progression contract, not merely a visual crop.
+	# Keep a defensive cap here for custom configs; production milestones are
+	# tested to expose every blocker in five rows or fewer, including this hold.
+	return rows.slice(0, MAX_CHECKPOINT_GOAL_ROWS)
 
-func _ordered_cycle_rows(goal: Dictionary, progress: Dictionary) -> Array[Dictionary]:
-	var rows: Array[Dictionary] = []
+func _ordered_cycle_row(goal: Dictionary, progress: Dictionary, objective: Dictionary) -> Dictionary:
 	var sequence: Array = progress.get("sequence", [])
 	var sequence_progress := int(progress.get("sequence_progress", 0))
 	var sequence_completed := bool(progress.get("sequence_completed", false))
-	for index in range(sequence.size()):
-		var completed := sequence_completed or index < sequence_progress
-		var is_next := not sequence_completed and index == sequence_progress
-		var event_type := str(sequence[index])
-		rows.append({
-			"id": "%s_step_%d" % [str(goal.get("id", "cycle")), index],
-			"label": "Rabbit is born" if event_type == "birth" else "Fox kills a rabbit",
-			"value": "Done" if completed else ("Next" if is_next else "Waiting"),
-			"kind": "rabbit" if event_type == "birth" else "fox",
-			"state": "success" if completed else ("warning" if is_next else "normal"),
-		})
-	return rows
+	var next_event := ""
+	if not sequence_completed and sequence_progress < sequence.size():
+		next_event = str(sequence[sequence_progress])
+	var next_copy := "Cycle complete"
+	if next_event == "birth":
+		next_copy = "Next: rabbit birth"
+	elif next_event == "hunt":
+		next_copy = "Next: fox hunt"
+	var value := "%d/%d · complete" % [int(goal.get("current", sequence_progress)), int(goal.get("target", sequence.size()))]
+	if not sequence_completed:
+		value = "%d/%d · %s next" % [int(goal.get("current", sequence_progress)), int(goal.get("target", sequence.size())), next_event]
+	var row_id := str(goal.get("id", "cycle"))
+	return {
+		"id": row_id,
+		"label": str(goal.get("label", "Food-web cycle")),
+		"value": value,
+		"kind": "rabbit" if next_event == "birth" else "fox",
+		"state": "success" if sequence_completed else "warning",
+		"tooltip": _goal_tooltip(objective, row_id, next_copy),
+	}
 
 func _goal_row(row_id: String, label_text: String, current: int, target: int, kind: String, complete: bool, incomplete_state: String = "normal") -> Dictionary:
 	return {
@@ -799,11 +822,50 @@ func _player_goal_label(goal: Dictionary) -> String:
 			return "Foxes alive"
 	return str(goal.get("label", "The meadow keeps going"))
 
-## A hint explains the current checkpoint's rules, so it is deliberately
-## objective-scoped rather than phase-scoped. Live conditions belong in
-## TRY THIS; otherwise an open definition flickers as evidence comes and goes.
-func _checkpoint_hint(objective: Dictionary) -> String:
-	return str(objective.get("guidance", ""))
+## The guide is static reference material. Only NEXT MOVE is reactive, which
+## prevents an explanation from switching back to an earlier goal when a live
+## nursery or living-animal count fluctuates.
+func _checkpoint_guide_overview(objective: Dictionary) -> String:
+	var universal := "Every row must be complete before the hold can run. Select ? beside any goal for its fixed definition. Live counts and living credit can fall; saved evidence stays for this checkpoint. NEXT MOVE is the only guidance that changes with the meadow."
+	var checkpoint_note := str(objective.get("guide_intro", objective.get("guidance", "")))
+	return universal if checkpoint_note.is_empty() else "%s\n\n%s" % [universal, checkpoint_note]
+
+func _checkpoint_goal_help(objective: Dictionary, rows: Array[Dictionary]) -> Dictionary:
+	var configured: Dictionary = objective.get("goal_help", {})
+	var entries := {}
+	for row in rows:
+		var row_id := str(row.get("id", ""))
+		if not configured.has(row_id):
+			continue
+		var entry: Dictionary = configured[row_id].duplicate(true)
+		entry["title"] = str(row.get("label", "Goal"))
+		entry["detail"] = _goal_help_detail(objective, row_id)
+		entries[row_id] = entry
+	return entries
+
+func _goal_tooltip(objective: Dictionary, row_id: String, live_detail: String = "") -> String:
+	var static_detail := _goal_help_detail(objective, row_id)
+	if static_detail.is_empty():
+		return live_detail
+	return static_detail if live_detail.is_empty() else "%s\n\n%s" % [static_detail, live_detail]
+
+func _goal_help_detail(objective: Dictionary, row_id: String) -> String:
+	var configured: Dictionary = objective.get("goal_help", {})
+	if not configured.has(row_id):
+		return ""
+	var entry: Dictionary = configured[row_id]
+	var detail := str(entry.get("detail", ""))
+	var window := float(objective.get("evidence_window", 0.0))
+	if "{sequence_window}" in detail:
+		detail = detail.replace("{sequence_window}", _format_rule_duration(window))
+	return detail
+
+func _format_rule_duration(seconds: float) -> String:
+	var rounded_seconds := maxi(0, roundi(seconds))
+	if rounded_seconds > 0 and rounded_seconds % 60 == 0:
+		var minutes := rounded_seconds / 60
+		return "%d %s" % [minutes, "minute" if minutes == 1 else "minutes"]
+	return _format_short_time(seconds)
 
 func _on_objective_details_toggled(_open: bool) -> void:
 	objective_layout_mode = ""
@@ -838,6 +900,9 @@ func _checkpoint_action(default_action: Dictionary, progress: Dictionary) -> Dic
 		if bool(criterion.get("met", false)):
 			continue
 		match str(criterion.get("type", "")):
+			"founders_fed":
+				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
+				return {"title": "Help %d more %s find food." % [missing, "rabbit" if missing == 1 else "rabbits"], "detail": "Keep reachable food close to the founding colony.", "kind": "rabbit"}
 			"safe_havens":
 				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
 				var group_size := int(criterion.get("rabbits_per_group", 2))
@@ -863,9 +928,12 @@ func _checkpoint_action(default_action: Dictionary, progress: Dictionary) -> Dic
 	var sequence_progress := int(progress["sequence_progress"])
 	if not sequence.is_empty() and sequence_progress < sequence.size():
 		var event_type := str(sequence[sequence_progress])
+		var hunt_detail := "Protect the remaining colony so it can renew."
+		if int(progress.get("rabbit_target", 0)) > 0:
+			hunt_detail = "Keep at least %d rabbits alive so the colony can recover." % int(progress["rabbit_target"])
 		return {
 			"title": "Wait for 1 rabbit birth." if event_type == "birth" else "Let a fox kill 1 rabbit.",
-			"detail": "Keep adult rabbits together near food." if event_type == "birth" else "Keep at least %d rabbits alive so the colony can recover." % int(progress.get("rabbit_target", 0)),
+			"detail": "Keep adult rabbits together near food." if event_type == "birth" else hunt_detail,
 			"kind": "rabbit" if event_type == "birth" else "fox",
 		}
 	return default_action
@@ -883,25 +951,15 @@ func _qualitative_objective_coach(objective_id: String, phase: String, run_state
 		return {"title": "Let the pattern settle.", "detail": "The meadow is finding its balance; keep changes gentle.", "kind": "leaf"}
 	match objective_id:
 		"colony_gathers":
-			return {"title": "Start the colony.", "detail": "Place four rabbits near food with room to gather.", "kind": "rabbit"}
+			return {"title": "Start the colony.", "detail": "Place four rabbits near food and help three different founders eat.", "kind": "rabbit"}
 		"new_arrivals":
-			return {"title": "Make room for new life.", "detail": "Keep adult rabbits together near food until two young rabbits arrive.", "kind": "rabbit"}
-		"young_foragers":
-			return {"title": "Help the young find food.", "detail": "Keep the meadow-born rabbits near replenishing food while they grow.", "kind": "rabbit"}
-		"birthplaces":
-			return {"title": "Spread new life across the meadow.", "detail": "Set up three well-spaced food patches with breeding rabbits nearby.", "kind": "rabbit"}
+			return {"title": "Raise a new generation.", "detail": "New births, young foragers, and new birth areas all start counting now.", "kind": "rabbit"}
 		"nursery_network":
-			return {"title": "Build three lasting nurseries.", "detail": "Keep three nurseries of at least three rabbits near usable food patches.", "kind": "rabbit"}
-		"first_hunt":
-			return {"title": "Let a fox kill 1 rabbit.", "detail": "Keep at least 6 rabbits alive, then wait for a rabbit birth.", "kind": "fox"}
-		"life_returns":
-			return {"title": "Let a fox kill 1 rabbit.", "detail": "Complete kill → birth → kill while keeping at least 7 rabbits alive.", "kind": "fox"}
-		"two_safe_havens":
-			return {"title": "Keep both nurseries alive.", "detail": "Keep two nurseries fed and let the foxes move through without emptying either one.", "kind": "rabbit"}
+			return {"title": "Build three lasting nurseries.", "detail": "Create fresh families in three separated, well-fed parts of the meadow.", "kind": "rabbit"}
 		"predators_find_place":
-			return {"title": "Help both predators share the meadow.", "detail": "Spread out food and rabbits so both foxes can feed while life continues.", "kind": "fox"}
+			return {"title": "Begin a fresh food-web cycle.", "detail": "Both foxes must hunt around a new birth, then that young rabbit must grow and eat.", "kind": "fox"}
 		"living_ecosystem":
-			return {"title": "Watch the whole meadow.", "detail": "Keep food in several places and let hunts and new life take turns.", "kind": "leaf"}
+			return {"title": "Renew the whole meadow.", "detail": "Complete hunt → birth → hunt → birth → hunt, raise young in three birth areas, and keep every nursery live.", "kind": "leaf"}
 	return {"title": "Watch the ecosystem.", "detail": "Respond to what the living meadow needs.", "kind": "leaf"}
 
 func _format_short_time(seconds: float) -> String:

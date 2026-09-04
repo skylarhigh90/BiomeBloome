@@ -63,7 +63,13 @@ func _scenario_poor_placement() -> Dictionary:
 	return {"start": start, "peak": peak, "end": sim.rabbits.size(), "survival": float(sim.rabbits.size()) / float(start)}
 
 func _scenario_predator_introduction() -> Dictionary:
-	var sim = Simulation.new(Config.make().duplicate(true), 882)
+	# Keep this base predator-behavior scenario free of terrain refuge and Stream
+	# routing; those interactions are exercised by terrain_playtest_runner.
+	var config := Config.make().duplicate(true)
+	config["world"]["forest_patch_count"] = 0
+	config["terrain"]["thicket"]["patch_count"] = 0
+	config["terrain"]["stream"]["enabled"] = false
+	var sim = Simulation.new(config, 882)
 	_add_food_patch(sim, Vector2.ZERO, 7)
 	for index in range(10):
 		sim.add_rabbit(Vector2.from_angle(float(index) / 10.0 * TAU) * (25.0 + float(index % 3) * 10.0))
@@ -74,18 +80,19 @@ func _scenario_predator_introduction() -> Dictionary:
 	var rabbit_peak: int = sim.rabbits.size()
 	var fleeing_ticks := 0
 	var hunting_ticks := 0
-	var captures := 0
+	var captures := {"count": 0}
+	sim.predation_succeeded.connect(func(_fox: int, _rabbit: int, _position: Vector2) -> void:
+		captures["count"] += 1
+	)
 	for tick in range(700):
-		var before: int = sim.rabbits.size()
 		sim.step(0.1)
 		rabbit_peak = maxi(rabbit_peak, sim.rabbits.size())
-		captures += maxi(0, before - sim.rabbits.size())
 		for rabbit in sim.rabbits.values():
 			if rabbit["behavior"] == "flee":
 				fleeing_ticks += 1
 		if sim.foxes.has(fox_id) and sim.foxes[fox_id]["behavior"] == "hunt":
 			hunting_ticks += 1
-	return {"rabbit_peak": rabbit_peak, "rabbit_end": sim.rabbits.size(), "fox_end": sim.foxes.size(), "captures": captures, "fleeing_ticks": fleeing_ticks, "hunting_ticks": hunting_ticks}
+	return {"rabbit_peak": rabbit_peak, "rabbit_end": sim.rabbits.size(), "fox_end": sim.foxes.size(), "captures": captures["count"], "fleeing_ticks": fleeing_ticks, "hunting_ticks": hunting_ticks}
 
 func _scenario_predator_collapse() -> Dictionary:
 	var config := Config.make().duplicate(true)

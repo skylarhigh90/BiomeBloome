@@ -30,25 +30,28 @@ The ecosystem freezes while a supply bundle is being chosen or while the player 
 
 ## Plant ecology
 
-Food patches retain continuous biomass, but now expose a readable lifecycle: **Abundant → Healthy → Sparse → Depleted → Recovering → Healthy**. Once a patch is depleted, Rabbits abandon it until it has rebuilt a meaningful reserve; regeneration continues during that recovery window. Carrots recover quickly with low capacity, while Berry Bushes retain their slower, larger-capacity role. Hungry Rabbits see nearby usable food and can share that current vision through a connected social group, then each Rabbit takes the shortest reachable route from its own position.
+Food patches retain continuous biomass, but now expose a readable lifecycle: **Abundant → Healthy → Sparse → Depleted → Recovering → Healthy**. Once a patch is depleted, Rabbits abandon it until it has rebuilt a meaningful reserve; regeneration continues during that recovery window. Carrots recover quickly with low capacity, while Berry Bushes retain their slower, larger-capacity role. Hungry Rabbits see nearby usable food and can share that current vision through a connected social group, then each Rabbit takes the shortest reachable route from its own position. If that local search fails, hunger makes them remember prior patches and widen their search; a starving Rabbit may take a last-resort bite from recovering growth.
+
+Rabbit reproduction is tied to renewable carrying capacity. A birth requires stocked local forage, enough meadow-wide regeneration to support another animal, and a real biomass/parent-energy investment. Reproduction therefore pauses before a food crash and resumes when the player adds productive plants; the population strip reports when forage is full. Eating immediately relieves some accumulated starvation debt, so a rescue meal is meaningfully recoverable instead of merely delaying death.
+
+Fox hunts use coordinated prey claims and finite sprint stamina. Nearby Foxes prefer different reachable prey, use short closing bursts, learn modestly from failed pursuits, and become more persistent as hunger rises. Rabbits also have finite flee stamina: open-ground chases eventually tire them, while Thicket conserves their escape stamina and still reduces Fox movement/capture buildup. Severe hunger makes a Rabbit accept more predation risk rather than flee beside food until it starves. Fox reproduction requires a sustainable local prey-to-predator ratio.
 
 Plant silhouettes communicate current food stock: exhausted Carrot Patches show disturbed earth and clipped stems with no edible root, exhausted Berry Bushes become cropped and fruitless, and both use bright new growth while recovering. A separate, permanent ground footprint communicates habitat quality—compact dry soil for a poor site and a broader green verge for a productive one—without changing with grazing.
 
-## V0.5 compound progression
+## Focused checkpoint progression
 
-The run unfolds through ten ecological checkpoints. The opening now teaches one rabbit-colony behavior at a time before the existing predator arc begins.
+The run unfolds through five longer ecological checkpoints. Every checkpoint has at most five visible goals, including its final hold, and almost all evidence starts from zero when that checkpoint opens.
 
-- The first five checkpoints ramp through rabbit populations of **4 → 6 → 8 → 10 → 12**.
-- **New Arrivals** requires two natural births, and **Young Foragers** then requires two meadow-born rabbits to mature and feed.
-- **Life Across the Meadow** requires fresh births in three separated areas. **A Nursery Network** follows by asking for three simultaneous nurseries of at least three rabbits near usable food in the gradually expanded meadow.
-- Every completed checkpoint reveals one small additional band of the persistent terrain. Checkpoints 5, 7, and 9 remain the major staging beats; checkpoint 5 unlocks Foxes, introduces a pair, and switches to the Web supply pool. Only final success opens a modal.
-- Predator play ramps through **hunt → birth**, then **hunt → birth → hunt**. Extra events do not erase valid progress, but unfinished sequences expire.
-- **Nurseries Under Pressure** combines two separated, fed nurseries with a fresh hunt-and-renewal cycle and a full 12-second healthy hold.
-- **Predators Find Their Place** additionally requires two distinct living hunters and at least four rabbits per fox.
-- **Living Ecosystem** combines three nurseries, two hunters, distributed births, a healthy prey reserve, and **hunt → birth → hunt → birth → hunt**, followed by a 20-second hold.
-- The normal HUD shows every active condition as a task/status checklist, including populations, ecological evidence, health, trend, sequence order, and hold progress. F3 retains deeper diagnostics.
-- The same persistent world grows in nine 48-unit steps from radius 360 → 792. The camera follows each reveal at a deliberately slow, nearly continuous rate; existing creatures and plants remain in place.
-- After checkpoint 5, losing rabbit breeding viability can make the ecosystem Critical. The first collapse has one hidden supply safety net; later collapses can end the run.
+- **A Colony Gathers** asks for four living rabbits, three distinct fed founders, and a 10-second hold.
+- **A New Generation** starts fresh counters for four births, three young rabbits that grow and eat, and births in two separated areas, followed by a 16-second hold.
+- **A Nursery Network** requires fresh raised young and fresh births across three areas while three live nurseries hold together for 20 seconds. Completing it unlocks two Foxes and the Web supply pool.
+- **Predator–Prey Rhythm** starts with no inherited event credit: two distinct Foxes must complete **hunt → birth → hunt**, and a rabbit born after the opening hunt must grow and eat before a 22-second hold.
+- **Living Ecosystem** may inherit the live nursery network, but its five-event food-web cycle—**hunt → birth → hunt → birth → hunt**—three birth areas, and three grown young all reset. The final hold lasts 30 seconds.
+- Ordered cycles use one checklist row with step progress and the next event in the visible value, keeping even the final checkpoint to five rows.
+- Every goal row has a `?` explainer that is available immediately and never changes with progress. Explainers say whether evidence is live, saved for the checkpoint, tied to a surviving animal, or locked only after a timed sequence completes.
+- Extra births or hunts do not erase a valid ordered sequence, but unfinished sequences still expire.
+- The same persistent world grows in four 96-unit reveals from radius 360 → 744. The camera follows each reveal while existing creatures and plants remain in place.
+- After checkpoint 3, losing rabbit breeding viability can make the ecosystem Critical. The first collapse has one hidden supply safety net; later collapses can end the run.
 - A completed run can continue as a sandbox epilogue or restart as a fresh ecosystem.
 
 ## V0.4 Temperate Wilds terrain
@@ -82,6 +85,7 @@ Simulation state does not depend on scene collisions or rendering FPS. Populatio
 All gameplay balance is centralized in [`config/game_config.gd`](config/game_config.gd):
 
 - `rabbit` and `fox`: movement, perception, hunger, reproduction, starvation, lifespan
+- Rabbit carrying-capacity, food-memory, emergency-search, and recovery tuning live beside the other `rabbit` values; Fox target competition and sprint/rest tuning live under `fox`
 - `plants`: capacity, regeneration, lifecycle thresholds, and recovery release point
 - `inventory`: starting hand
 - `supply`: interval, milestone-aware bundle pools, and first-collapse recovery bundle
@@ -157,6 +161,12 @@ Run the balance diagnostic (all variants, or append one name such as `current`):
 godot --headless --path . --script res://tests/balance_probe.gd -- current
 ```
 
+Run the long-form, multi-seed stability playthroughs (carrying capacity, forage intervention, and coordinated predators):
+
+```sh
+godot --headless --path . --script res://tests/ecosystem_stability_runner.gd
+```
+
 Run a project/scene smoke check:
 
 ```sh
@@ -171,4 +181,4 @@ godot --path . --script res://tests/plant_ecology_visual_runner.gd -- expanded /
 
 ## Debug mode
 
-The normal objective card separates literal event steps under `DO THIS`, live minimums and species health under `KEEP`, and the simultaneous hold under `FINISH`. Ordered predator steps say exactly when a fox must kill a rabbit and when a rabbit must be born. Rabbit/Fox hunger use separate `Fed`, `Hungry`, and `Starving` signals, while minimum and maximum blockers stay quantitative. `TRY THIS` gives the next useful action, and `Need a hint?` expands one optional player-facing idea. Press F3 during play for raw evaluator identities and timing, Critical timing, fixed tick rate, populations, seed, simulation time, and selected-animal state. Selection also visualizes relevant local perception radii, habitat composition, chosen refuge, current target, route waypoints, route/direct distance, and selected ford.
+The normal objective card shows no more than five compact goal rows, including `All goals together`. An ordered predator cycle stays on one row; its value shows both completed steps and the next event. `NEXT MOVE · UPDATES LIVE` is the only reactive coaching surface. Each row's `?` opens a fixed definition and a persistence label such as `LIVE · CAN RISE OR FALL` or `SAVED · THIS CHECKPOINT`; `How progress works` explains the model as a whole. Press F3 during play for raw evaluator identities and timing, Critical timing, fixed tick rate, populations, seed, simulation time, and selected-animal state. Selection also visualizes relevant local perception radii, habitat composition, chosen refuge, current target, route waypoints, route/direct distance, and selected ford.

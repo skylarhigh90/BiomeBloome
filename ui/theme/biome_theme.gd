@@ -116,6 +116,8 @@ static func create() -> Theme:
 	theme.set_font_size("font_size", "IconButton", 21)
 	_set_button(theme, "CheckpointInfoButton", Color(0.18, 0.29, 0.23, 0.06), COLOR.text_secondary, Color(0.18, 0.29, 0.23, 0.11), COLOR.accent_soft)
 	theme.set_font_size("font_size", "CheckpointInfoButton", TYPE_SIZE.caption)
+	_set_button(theme, "CheckpointInfoIconButton", Color(0.18, 0.29, 0.23, 0.07), COLOR.text_secondary, COLOR.accent_soft, COLOR.accent_highlight)
+	theme.set_font_size("font_size", "CheckpointInfoIconButton", TYPE_SIZE.caption)
 	_set_button(theme, "CompactButton", Color("#28493c"), COLOR.text_on_dark, Color("#3c6852"), COLOR.accent)
 	_set_button(theme, "CompactButtonSelected", COLOR.accent, COLOR.forest_deep, COLOR.accent.lightened(0.14), COLOR.accent.darkened(0.08))
 	_set_inventory_button(theme, "InventoryButton", false)

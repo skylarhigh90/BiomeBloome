@@ -22,8 +22,13 @@ func _run_all() -> void:
 	_test_social_vision_is_transitive_and_personal()
 	_test_rabbit_finishes_meal_before_roaming()
 	_test_rabbit_requires_local_or_social_food_vision()
+	_test_rabbit_escalates_food_search()
 	_test_rabbit_flees_nearby_fox()
+	_test_rabbit_flee_stamina_recovers_after_danger()
 	_test_fox_targets_nearby_rabbit()
+	_test_foxes_split_reachable_prey()
+	_test_fox_sprint_uses_stamina()
+	_test_fox_learns_from_failed_pursuit()
 	_test_hunt_removes_exact_prey()
 	_test_plant_loses_food_when_eaten()
 	_test_plant_regenerates()
@@ -32,11 +37,13 @@ func _run_all() -> void:
 	_test_rabbit_food_choice_is_distance_led()
 	_test_carrot_patch_retains_fast_low_capacity_role()
 	_test_rabbit_reproduction_creates_entity()
+	_test_rabbit_reproduction_respects_carrying_capacity()
 	_test_rabbit_reproduction_requires_readiness()
 	_test_fox_reproduction_creates_entity()
 	_test_fox_reproduction_requires_readiness()
 	_test_hunger_summary_distinguishes_foraging_from_danger()
 	_test_starvation_kills_creatures()
+	_test_feeding_relieves_starvation_debt()
 	_test_pause_stops_simulation_time()
 	_test_speed_multipliers()
 	_test_objective_stability_starts_immediately_and_resets()
@@ -197,6 +204,22 @@ func _test_rabbit_requires_local_or_social_food_vision() -> void:
 	sim.step(0.1)
 	_expect(sim.plants[plant_id]["food"] == before and sim.rabbits[rabbit_id]["target_id"] == -1, "food remains outside an isolated rabbit's local vision", "%.2f -> %.2f; target %s" % [before, sim.plants[plant_id]["food"], str(sim.rabbits[rabbit_id]["target_id"])])
 
+func _test_rabbit_escalates_food_search() -> void:
+	var config := _flat_food_config()
+	config["rabbit"]["food_detection_radius"] = 90.0
+	config["rabbit"]["social_proximity_radius"] = 0.0
+	config["rabbit"]["move_speed"] = 0.0
+	var sim = Simulation.new(config, 8371)
+	var rabbit_id: int = sim.add_rabbit(Vector2.ZERO)
+	var plant_id: int = sim.add_plant("carrot_patch", Vector2(220.0, 0.0))
+	sim.rabbits[rabbit_id]["hunger"] = 60.0
+	sim.step(0.1)
+	var started_local: bool = int(sim.rabbits[rabbit_id]["target_id"]) == -1
+	_step_many(sim, 4.0)
+	var escalated: bool = int(sim.rabbits[rabbit_id]["target_id"]) == plant_id \
+		or float(sim.plants[plant_id]["food"]) < float(sim.plants[plant_id]["max_food"])
+	_expect(started_local and escalated, "unserved Rabbits widen their food search after trying locally", "target %s, failure %.1f" % [str(sim.rabbits[rabbit_id]["target_id"]), float(sim.rabbits[rabbit_id]["forage_failure_time"])])
+
 func _test_rabbit_flees_nearby_fox() -> void:
 	var sim = Simulation.new(_fresh_config())
 	var rabbit_id: int = sim.add_rabbit(Vector2.ZERO)
@@ -205,6 +228,19 @@ func _test_rabbit_flees_nearby_fox() -> void:
 	var rabbit: Dictionary = sim.rabbits[rabbit_id]
 	_expect(rabbit["behavior"] == "flee" and rabbit["target_id"] == fox_id and rabbit["velocity"].x < 0.0, "rabbits flee nearby foxes")
 
+func _test_rabbit_flee_stamina_recovers_after_danger() -> void:
+	var sim = Simulation.new(_flat_food_config())
+	var rabbit_id: int = sim.add_rabbit(Vector2.ZERO)
+	var fox_id: int = sim.add_fox(Vector2(70.0, 0.0))
+	var rabbit: Dictionary = sim.rabbits[rabbit_id]
+	var full_stamina: float = rabbit["flee_stamina"]
+	sim.step(0.2)
+	var spent_stamina: float = rabbit["flee_stamina"]
+	sim.kill_fox(fox_id, "test")
+	sim.step(0.2)
+	sim.step(1.0)
+	_expect(spent_stamina < full_stamina and float(rabbit["flee_stamina"]) > spent_stamina, "Rabbit flee stamina is finite and recovers after danger passes")
+
 func _test_fox_targets_nearby_rabbit() -> void:
 	var sim = Simulation.new(_fresh_config())
 	var fox_id: int = sim.add_fox(Vector2.ZERO)
@@ -212,6 +248,43 @@ func _test_fox_targets_nearby_rabbit() -> void:
 	sim.foxes[fox_id]["hunger"] = 60.0
 	sim.step(0.1)
 	_expect(sim.foxes[fox_id]["behavior"] == "hunt" and sim.foxes[fox_id]["target_id"] == rabbit_id, "foxes target nearby rabbits")
+
+func _test_foxes_split_reachable_prey() -> void:
+	var sim = Simulation.new(_flat_food_config(), 4419)
+	var first_fox: int = sim.add_fox(Vector2(0.0, -4.0))
+	var second_fox: int = sim.add_fox(Vector2(0.0, 4.0))
+	sim.add_rabbit(Vector2(-80.0, 0.0))
+	sim.add_rabbit(Vector2(80.0, 0.0))
+	for fox_id in [first_fox, second_fox]:
+		sim.foxes[fox_id]["hunger"] = 60.0
+	sim.step(0.1)
+	var first_target: int = sim.foxes[first_fox]["target_id"]
+	var second_target: int = sim.foxes[second_fox]["target_id"]
+	_expect(first_target != -1 and second_target != -1 and first_target != second_target, "Foxes split across prey instead of duplicating the same hunt")
+
+func _test_fox_sprint_uses_stamina() -> void:
+	var config := _flat_food_config()
+	config["rabbit"]["reproduction_food_needed"] = 99999.0
+	var sim = Simulation.new(config, 9157)
+	var fox_id: int = sim.add_fox(Vector2.ZERO)
+	var rabbit_id: int = sim.add_rabbit(Vector2(105.0, 0.0))
+	sim.foxes[fox_id]["hunger"] = 60.0
+	var before_distance: float = sim.foxes[fox_id]["position"].distance_to(sim.rabbits[rabbit_id]["position"])
+	var before_stamina: float = sim.foxes[fox_id]["sprint_stamina"]
+	_step_many(sim, 0.8)
+	var after_distance: float = sim.foxes[fox_id]["position"].distance_to(sim.rabbits[rabbit_id]["position"]) if sim.rabbits.has(rabbit_id) else 0.0
+	_expect(float(sim.foxes[fox_id]["sprint_stamina"]) < before_stamina and sim.foxes[fox_id]["behavior"] == "hunt", "Foxes spend finite sprint stamina during an active hunt", "distance %.1f -> %.1f" % [before_distance, after_distance])
+
+func _test_fox_learns_from_failed_pursuit() -> void:
+	var config := _flat_food_config()
+	config["fox"]["max_pursuit_duration"] = 0.1
+	config["fox"]["capture_distance"] = 0.0
+	var sim = Simulation.new(config)
+	var fox_id: int = sim.add_fox(Vector2.ZERO)
+	sim.add_rabbit(Vector2(100.0, 0.0))
+	sim.foxes[fox_id]["hunger"] = 60.0
+	sim.step(0.1)
+	_expect(int(sim.foxes[fox_id]["failed_pursuits"]) == 1 and int(sim.foxes[fox_id]["failed_target_id"]) != -1, "a failed hunt teaches only the Fox that attempted it")
 
 func _test_hunt_removes_exact_prey() -> void:
 	var config := _fresh_config()
@@ -310,15 +383,34 @@ func _test_rabbit_reproduction_creates_entity() -> void:
 	var sim = Simulation.new(config)
 	var first: int = sim.add_rabbit(Vector2.ZERO)
 	var second: int = sim.add_rabbit(Vector2(12.0, 0.0))
-	sim.add_plant("berry_bush", Vector2(4.0, 10.0))
+	for position in [Vector2(-24.0, 10.0), Vector2(4.0, 10.0), Vector2(30.0, -8.0)]:
+		sim.add_plant("carrot_patch", position)
+	for position in [Vector2(-16.0, -20.0), Vector2(26.0, 22.0)]:
+		sim.add_plant("berry_bush", position)
 	_make_eligible_rabbit(sim, first)
 	_make_eligible_rabbit(sim, second)
+	sim.rebuild_spatial_index()
+	var food_before := sim._local_available_food(Vector2.ZERO, 210.0)
 	sim.step(0.1)
 	var has_newborn := false
 	for rabbit in sim.rabbits.values():
 		if rabbit["reason"] == "birth" and rabbit["age"] < 1.0:
 			has_newborn = true
-	_expect(sim.rabbits.size() == 3 and has_newborn, "rabbit reproduction creates an actual entity")
+	var food_after := sim._local_available_food(Vector2.ZERO, 210.0)
+	var parents_paid: bool = float(sim.rabbits[first]["recent_food"]) < 100.0 and float(sim.rabbits[first]["hunger"]) >= 4.0
+	_expect(sim.rabbits.size() == 3 and has_newborn and food_before - food_after >= 1.7 and parents_paid, "rabbit reproduction creates an entity and spends real ecological resources", "population %d, biomass delta %.2f" % [sim.rabbits.size(), food_before - food_after])
+
+func _test_rabbit_reproduction_respects_carrying_capacity() -> void:
+	var config := _flat_food_config()
+	var sim = Simulation.new(config)
+	var first: int = sim.add_rabbit(Vector2.ZERO)
+	var second: int = sim.add_rabbit(Vector2(10.0, 0.0))
+	sim.add_plant("berry_bush", Vector2(4.0, 8.0))
+	_make_eligible_rabbit(sim, first)
+	_make_eligible_rabbit(sim, second)
+	var budget: Dictionary = sim.local_forage_budget(Vector2.ZERO, 210.0)
+	sim.step(0.1)
+	_expect(float(budget["sustainable_rabbits"]) < 3.0 and sim.rabbits.size() == 2, "Rabbit births pause when local renewable forage cannot carry another animal")
 
 func _test_rabbit_reproduction_requires_readiness() -> void:
 	var sim = Simulation.new(_fresh_config())
@@ -332,9 +424,11 @@ func _test_rabbit_reproduction_requires_readiness() -> void:
 	_expect(sim.rabbits.size() == 2, "rabbit reproduction is limited by cooldown and conditions")
 
 func _test_fox_reproduction_creates_entity() -> void:
-	var sim = Simulation.new(_fresh_config())
+	var sim = Simulation.new(_flat_food_config())
 	var first: int = sim.add_fox(Vector2.ZERO)
 	var second: int = sim.add_fox(Vector2(16.0, 0.0))
+	for index in range(24):
+		sim.add_rabbit(Vector2.from_angle(float(index) / 24.0 * TAU) * 120.0)
 	_make_eligible_fox(sim, first)
 	_make_eligible_fox(sim, second)
 	sim.step(0.1)
@@ -342,7 +436,7 @@ func _test_fox_reproduction_creates_entity() -> void:
 	for fox in sim.foxes.values():
 		if fox["reason"] == "birth" and fox["age"] < 1.0:
 			has_newborn = true
-	_expect(sim.foxes.size() == 3 and has_newborn, "fox reproduction creates an actual entity")
+	_expect(sim.foxes.size() == 3 and has_newborn, "fox reproduction creates an actual entity", "foxes %d" % sim.foxes.size())
 
 func _test_fox_reproduction_requires_readiness() -> void:
 	var sim = Simulation.new(_fresh_config())
@@ -383,6 +477,18 @@ func _test_starvation_kills_creatures() -> void:
 	sim.step(0.1)
 	sim.step(0.1)
 	_expect(not sim.rabbits.has(rabbit_id) and not sim.foxes.has(fox_id), "starvation can kill rabbits and foxes")
+
+func _test_feeding_relieves_starvation_debt() -> void:
+	var config := _flat_food_config()
+	var sim = Simulation.new(config)
+	var rabbit_id: int = sim.add_rabbit(Vector2.ZERO)
+	sim.add_plant("berry_bush", Vector2.ZERO)
+	var rabbit: Dictionary = sim.rabbits[rabbit_id]
+	rabbit["hunger"] = config["rabbit"]["starvation_threshold"] + 1.0
+	rabbit["starvation_time"] = 8.0
+	var before: float = rabbit["starvation_time"]
+	sim.step(0.1)
+	_expect(float(rabbit["starvation_time"]) < before - 0.5 and sim.rabbits.has(rabbit_id), "a rescued animal sheds starvation debt as soon as it eats")
 
 func _test_pause_stops_simulation_time() -> void:
 	var systems = Systems.new(_fresh_config())
@@ -538,7 +644,9 @@ func _test_rabbits_spread_across_similar_food_targets() -> void:
 	_expect(balanced, "similar food targets attract different rabbits", str(chosen))
 
 func _test_spatial_hash_handles_prototype_scale() -> void:
-	var config := _fresh_config()
+	# Isolate the spatial-index budget from Stream route construction, which has
+	# its own dedicated performance and behavior coverage.
+	var config := _flat_food_config()
 	config["rabbit"]["reproduction_food_needed"] = 99999.0
 	config["fox"]["reproduction_food_needed"] = 99999.0
 	var sim = Simulation.new(config)

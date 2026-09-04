@@ -32,6 +32,8 @@ var last_tick_stats := {"queries": 0, "captures": 0, "births": 0}
 var rabbit_food_target_claims: Dictionary = {}
 var rabbit_shared_food_vision: Dictionary = {}
 var rabbit_social_groups: Dictionary = {}
+var fox_prey_target_claims: Dictionary = {}
+var reproduction_check_timer := 0.0
 
 func _init(p_config: Dictionary = {}, p_seed: int = -1) -> void:
 	config = p_config if not p_config.is_empty() else GameConfig.make()
@@ -51,6 +53,8 @@ func reset() -> void:
 	rabbit_food_target_claims.clear()
 	rabbit_shared_food_vision.clear()
 	rabbit_social_groups.clear()
+	fox_prey_target_claims.clear()
+	reproduction_check_timer = 0.0
 	spatial.clear()
 	next_entity_id = 1
 	rng.seed = int(config["simulation"]["seed"])
@@ -85,6 +89,9 @@ func add_rabbit(position: Vector2, reason: String = "placement") -> int:
 		"age": 0.0 if reason == "birth" else rng.randf_range(cfg["adult_age"], cfg["adult_age"] + 12.0),
 		"hunger": 17.0 + state_jitter * 1.5 if reason == "birth" else rng.randf_range(9.0, 22.0),
 		"food_motivated": false,
+		"food_memory": {},
+		"forage_failure_time": 0.0,
+		"last_fed_position": Vector2.INF,
 		"behavior": "wander",
 		"target_id": -1,
 		"reproduction_cooldown": cfg["newborn_cooldown"] + state_jitter * 1.2 if reason == "birth" else rng.randf_range(2.0, 8.0),
@@ -104,6 +111,7 @@ func add_rabbit(position: Vector2, reason: String = "placement") -> int:
 		"habitat_phase": rng.randf_range(0.0, TAU),
 		"personal_space": rng.randf_range(cfg["personal_space_min"], cfg["personal_space_max"]),
 		"refuge_position": Vector2.INF,
+		"flee_stamina": float(cfg.get("flee_stamina_capacity", 0.0)),
 		"route_waypoints": [],
 		"route_target_position": Vector2.INF,
 		"route_target_id": -1,
@@ -132,7 +140,7 @@ func add_fox(position: Vector2, reason: String = "placement") -> int:
 		"velocity": velocity,
 		"previous_velocity": velocity,
 		"age": 0.0 if reason == "birth" else rng.randf_range(cfg["adult_age"], cfg["adult_age"] + 20.0),
-		"hunger": 16.0 if reason == "birth" else rng.randf_range(10.0, 24.0),
+		"hunger": 16.0 if reason == "birth" else rng.randf_range(maxf(0.0, float(cfg["hunt_at"]) - 2.0), float(cfg["hunt_at"]) + 8.0),
 		"behavior": "wander",
 		"target_id": -1,
 		"reproduction_cooldown": cfg["newborn_cooldown"] if reason == "birth" else rng.randf_range(12.0, 30.0),
@@ -142,6 +150,13 @@ func add_fox(position: Vector2, reason: String = "placement") -> int:
 		"wander_timer": rng.randf_range(1.4, 4.2),
 		"starvation_time": 0.0,
 		"capture_progress": 0.0,
+		"sprint_stamina": float(cfg.get("sprint_stamina_capacity", 0.0)),
+		"is_sprinting": false,
+		"hunt_time": 0.0,
+		"failed_pursuits": 0,
+		"pursuit_rest_time": 0.0,
+		"failed_target_id": -1,
+		"failed_target_timer": 0.0,
 		"route_waypoints": [],
 		"route_target_position": Vector2.INF,
 		"route_target_id": -1,
@@ -298,6 +313,7 @@ func step(delta: float) -> void:
 	rebuild_spatial_index()
 	_rebuild_rabbit_shared_food_vision()
 	_rebuild_rabbit_food_target_claims()
+	_rebuild_fox_prey_target_claims()
 	var dead_rabbits: Array = []
 	var dead_foxes: Array = []
 	for entity_id in rabbits.keys():
@@ -311,8 +327,11 @@ func step(delta: float) -> void:
 	for entity_id in dead_foxes:
 		kill_fox(entity_id, "starvation" if foxes.has(entity_id) and foxes[entity_id]["age"] < foxes[entity_id]["lifespan"] else "age")
 	rebuild_spatial_index()
-	_process_rabbit_reproduction()
-	_process_fox_reproduction()
+	reproduction_check_timer -= delta
+	if reproduction_check_timer <= 0.0:
+		_process_rabbit_reproduction()
+		_process_fox_reproduction()
+		reproduction_check_timer = float(config["simulation"].get("reproduction_check_interval", 1.0))
 
 func _regenerate_plants(delta: float) -> void:
 	for plant in plants.values():
@@ -392,6 +411,7 @@ func _rebuild_rabbit_shared_food_vision() -> void:
 		for rabbit_id in local_vision:
 			rabbit_shared_food_vision[rabbit_id] = local_vision[rabbit_id]
 			rabbit_social_groups[rabbit_id] = [rabbit_id]
+			_update_rabbit_food_memory(rabbits[rabbit_id], local_vision[rabbit_id])
 		return
 
 	var visited: Dictionary = {}
@@ -418,6 +438,24 @@ func _rebuild_rabbit_shared_food_vision() -> void:
 		for member_id in group:
 			rabbit_shared_food_vision[member_id] = shared_food.duplicate()
 			rabbit_social_groups[member_id] = group.duplicate()
+			_update_rabbit_food_memory(rabbits[member_id], shared_food)
+
+func _update_rabbit_food_memory(rabbit: Dictionary, visible_food: Dictionary) -> void:
+	var memory: Dictionary = rabbit.get("food_memory", {})
+	var duration := float(config["rabbit"].get("food_memory_duration", 75.0))
+	for food_id in visible_food:
+		memory[food_id] = simulation_time
+	for food_id in memory.keys():
+		if not plants.has(food_id) or simulation_time - float(memory[food_id]) > duration:
+			memory.erase(food_id)
+	rabbit["food_memory"] = memory
+
+func _rebuild_fox_prey_target_claims() -> void:
+	fox_prey_target_claims.clear()
+	for fox in foxes.values():
+		var target_id := int(fox.get("target_id", -1))
+		if target_id != -1 and rabbits.has(target_id):
+			fox_prey_target_claims[target_id] = int(fox_prey_target_claims.get(target_id, 0)) + 1
 
 func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 	var cfg: Dictionary = config["rabbit"]
@@ -434,7 +472,14 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 	var caution_scale: float = rabbit["caution_scale"]
 	var detection_radius: float = cfg["fox_detection_radius"] * caution_scale
 	var release_radius: float = cfg["flee_release_radius"] * caution_scale
+	var hunger_risk_pressure := clampf(inverse_lerp(float(cfg["hunger_warning_at"]), float(cfg["starvation_threshold"]), float(rabbit["hunger"])), 0.0, 1.0)
+	var starving_threat_factor := float(cfg.get("starving_threat_radius_factor", 1.0))
+	detection_radius *= lerpf(1.0, starving_threat_factor, hunger_risk_pressure)
+	release_radius *= lerpf(1.0, starving_threat_factor, hunger_risk_pressure)
 	var was_fleeing: bool = rabbit["behavior"] == "flee"
+	var flee_stamina_capacity := float(cfg.get("flee_stamina_capacity", 0.0))
+	if not was_fleeing:
+		rabbit["flee_stamina"] = minf(flee_stamina_capacity, float(rabbit.get("flee_stamina", 0.0)) + float(cfg.get("flee_stamina_recovery", 0.0)) * delta)
 	var thicket_cfg: Dictionary = config["terrain"]["thicket"]
 	var refuge_detection_radius := detection_radius * float(thicket_cfg.get("refuge_threat_detection_factor", 1.0))
 	var threat := _best_reachable_threat(position, maxf(release_radius, refuge_detection_radius))
@@ -457,6 +502,13 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 			should_flee = not prepared_refuge.is_empty()
 	if should_flee:
 		rabbit["behavior"] = "flee"
+		var active_flee_speed := float(cfg["flee_speed"])
+		if float(rabbit.get("flee_stamina", 0.0)) > 0.0:
+			var cover := terrain.thicket_cover(position)
+			var stamina_drain := lerpf(1.0, float(thicket_cfg.get("rabbit_flee_stamina_drain_factor", 1.0)), cover)
+			rabbit["flee_stamina"] = maxf(0.0, float(rabbit["flee_stamina"]) - delta * stamina_drain)
+		else:
+			active_flee_speed = float(cfg.get("exhausted_flee_speed", cfg["move_speed"]))
 		_set_rabbit_target(rabbit, threat["id"])
 		var needs_refuge := not was_fleeing or refuge_position == Vector2.INF \
 			or not is_position_valid(refuge_position) \
@@ -476,13 +528,13 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 				_clear_ground_route(rabbit)
 			refuge_position = rabbit["refuge_position"]
 		if refuge_position != Vector2.INF:
-			var refuge_speed: float = cfg["flee_speed"] * rabbit["speed_scale"]
+			var refuge_speed: float = active_flee_speed * rabbit["speed_scale"]
 			if terrain.thicket_cover(position) >= float(thicket_cfg["refuge_cover_min"]):
 				# Once inside, keep evading through deep cover. Routing forever to one
 				# exact refuge point made Rabbits bunch up and oscillate there, turning
 				# their sanctuary into an easier Fox target. Movement is careful rather
 				# than a full open-ground sprint, so successful hunts remain possible.
-				var cover_evasion_speed: float = cfg["move_speed"] * rabbit["speed_scale"] \
+				var cover_evasion_speed: float = active_flee_speed * rabbit["speed_scale"] \
 					* float(thicket_cfg.get("refuge_evasion_speed_factor", 0.82))
 				desired = _rabbit_refuge_evasion_velocity(rabbit, threat["position"], cover_evasion_speed)
 			else:
@@ -491,7 +543,7 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 			var away: Vector2 = position - threat["position"]
 			if away.length_squared() < 0.01:
 				away = Vector2.from_angle(rng.randf_range(0.0, TAU))
-			desired = away.normalized() * cfg["flee_speed"] * rabbit["speed_scale"]
+			desired = away.normalized() * active_flee_speed * rabbit["speed_scale"]
 	else:
 		if rabbit["behavior"] == "flee":
 			rabbit["decision_timer"] = 0.0
@@ -506,6 +558,12 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 				rabbit["food_motivated"] = true
 		var hungry: bool = rabbit["food_motivated"]
 		var target_valid := _rabbit_food_target_is_valid(rabbit)
+		if hungry and not target_valid:
+			rabbit["forage_failure_time"] = float(rabbit.get("forage_failure_time", 0.0)) + delta
+		elif target_valid:
+			rabbit["forage_failure_time"] = maxf(0.0, float(rabbit.get("forage_failure_time", 0.0)) - delta * 2.0)
+		else:
+			rabbit["forage_failure_time"] = 0.0
 		var needs_decision: bool = rabbit["decision_timer"] <= 0.0
 		needs_decision = needs_decision or (hungry and rabbit["behavior"] in ["wander", "forage"] and not target_valid)
 		needs_decision = needs_decision or (not hungry and rabbit["behavior"] != "wander")
@@ -514,7 +572,7 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 			rabbit["decision_timer"] = rabbit["decision_interval"]
 			if hungry:
 				if not target_valid:
-					var food := _best_food_target(rabbit, rabbit_shared_food_vision.get(rabbit["id"], {}))
+					var food := _best_food_target(rabbit, _rabbit_food_candidates(rabbit))
 					if not food.is_empty():
 						var previous_target_id: int = rabbit["target_id"]
 						rabbit["behavior"] = "seek_food"
@@ -589,25 +647,75 @@ func _update_fox(fox: Dictionary, delta: float) -> bool:
 	fox["reproduction_cooldown"] = maxf(0.0, fox["reproduction_cooldown"] - delta)
 	fox["route_replan_timer"] = maxf(0.0, float(fox.get("route_replan_timer", 0.0)) - delta)
 	fox["woodland_patrol_timer"] = maxf(0.0, float(fox.get("woodland_patrol_timer", 0.0)) - delta)
+	fox["failed_target_timer"] = maxf(0.0, float(fox.get("failed_target_timer", 0.0)) - delta)
+	fox["pursuit_rest_time"] = maxf(0.0, float(fox.get("pursuit_rest_time", 0.0)) - delta)
+	if float(fox["failed_target_timer"]) <= 0.0:
+		fox["failed_target_id"] = -1
+	var stamina_capacity := float(cfg.get("sprint_stamina_capacity", 0.0))
+	if fox["behavior"] != "hunt" or float(fox["pursuit_rest_time"]) > 0.0:
+		fox["sprint_stamina"] = minf(stamina_capacity, float(fox.get("sprint_stamina", 0.0)) + float(cfg.get("sprint_stamina_recovery", 0.0)) * delta)
 	var position: Vector2 = fox["position"]
+	var hunger_pressure := clampf(inverse_lerp(float(cfg["hunt_at"]), float(cfg["starvation_threshold"]), float(fox["hunger"])), 0.0, 1.0)
+	var base_search_radius := float(cfg["prey_detection_radius"])
+	var emergency_search_radius := minf(world_radius * 2.0, base_search_radius * float(cfg.get("emergency_detection_factor", 1.55)))
+	var search_radius := lerpf(base_search_radius, emergency_search_radius, hunger_pressure)
 	var prey: Dictionary = {}
 	if fox["target_id"] != -1 and rabbits.has(fox["target_id"]):
 		var target_rabbit: Dictionary = rabbits[fox["target_id"]]
-		if position.distance_to(target_rabbit["position"]) <= cfg["prey_detection_radius"] * 1.25:
+		if int(fox.get("failed_target_id", -1)) != int(fox["target_id"]) \
+			and position.distance_to(target_rabbit["position"]) <= search_radius * 1.25:
 			# Terrain is static and every acquired target was reachable when chosen.
 			# Keep following the cached crossing until the moving-target threshold in
 			# _velocity_along_route asks for a materially useful replan.
 			prey = {"id": fox["target_id"], "position": target_rabbit["position"], "route": {}}
-	if prey.is_empty() and fox["hunger"] >= cfg["hunt_at"]:
-		prey = _best_reachable_prey(fox, cfg["prey_detection_radius"])
+	if prey.is_empty() and fox["hunger"] >= cfg["hunt_at"] and float(fox["pursuit_rest_time"]) <= 0.0:
+		prey = _best_reachable_prey(fox, search_radius)
 	var desired := Vector2.ZERO
 	if not prey.is_empty():
 		fox["behavior"] = "hunt"
 		fox["woodland_patrol_position"] = Vector2.INF
 		if fox["target_id"] != prey["id"]:
+			fox["hunt_time"] = 0.0
 			_set_ground_route(fox, prey["position"], prey["id"], prey["route"])
-		fox["target_id"] = prey["id"]
-		desired = _velocity_along_route(fox, prey["position"], prey["id"], cfg["chase_speed"], true)
+		_set_fox_target(fox, prey["id"])
+		fox["hunt_time"] = float(fox.get("hunt_time", 0.0)) + delta
+		var prey_distance := position.distance_to(prey["position"])
+		if float(fox["hunt_time"]) >= float(cfg.get("max_pursuit_duration", 20.0)):
+			fox["failed_target_id"] = prey["id"]
+			fox["failed_pursuits"] = int(fox.get("failed_pursuits", 0)) + 1
+			fox["failed_target_timer"] = float(cfg.get("failed_target_memory", 8.0))
+			fox["pursuit_rest_time"] = float(cfg.get("pursuit_rest_duration", 3.5))
+			fox["hunt_time"] = 0.0
+			_set_fox_target(fox, -1)
+			_clear_ground_route(fox)
+			prey = {}
+		else:
+			var learning_bonus := minf(
+				float(cfg.get("pursuit_learning_max_bonus", 0.0)),
+				float(fox.get("failed_pursuits", 0)) * float(cfg.get("pursuit_learning_per_failure", 0.0)),
+			)
+			var desperation_speed := lerpf(1.0, float(cfg.get("desperation_speed_factor", 1.0)), hunger_pressure) * (1.0 + learning_bonus)
+			var chase_speed := float(cfg["chase_speed"]) * desperation_speed
+			var sprint_radius := float(cfg.get("sprint_activation_radius", 170.0))
+			var stamina_recovery := float(cfg.get("sprint_stamina_recovery", 0.0)) \
+				* lerpf(1.0, float(cfg.get("desperation_stamina_recovery_factor", 1.0)), hunger_pressure)
+			if prey_distance > sprint_radius:
+				fox["is_sprinting"] = false
+				fox["sprint_stamina"] = minf(stamina_capacity, float(fox["sprint_stamina"]) + stamina_recovery * delta)
+			else:
+				if not bool(fox.get("is_sprinting", false)):
+					fox["sprint_stamina"] = minf(stamina_capacity, float(fox["sprint_stamina"]) + stamina_recovery * delta)
+					if float(fox["sprint_stamina"]) >= float(cfg.get("sprint_restart_stamina", stamina_capacity)):
+						fox["is_sprinting"] = true
+				if bool(fox.get("is_sprinting", false)):
+					chase_speed = float(cfg.get("sprint_speed", chase_speed)) * desperation_speed
+					fox["sprint_stamina"] = maxf(0.0, float(fox["sprint_stamina"]) - delta)
+					if float(fox["sprint_stamina"]) <= 0.0:
+						fox["is_sprinting"] = false
+				else:
+					chase_speed = float(cfg.get("exhausted_chase_speed", chase_speed)) * desperation_speed
+			desired = _velocity_along_route(fox, prey["position"], prey["id"], chase_speed, true)
+	if not prey.is_empty():
 		var cover := terrain.thicket_cover(prey["position"])
 		var thicket_cfg: Dictionary = config["terrain"]["thicket"]
 		var capture_distance: float = cfg["capture_distance"] * lerpf(1.0, float(thicket_cfg["fox_capture_range_factor"]), cover)
@@ -620,17 +728,25 @@ func _update_fox(fox: Dictionary, delta: float) -> bool:
 				if kill_rabbit(prey_id, "predation"):
 					fox["hunger"] = maxf(0.0, fox["hunger"] - cfg["meal_value"])
 					fox["recent_food"] += cfg["meal_value"]
+					fox["starvation_time"] = 0.0
+					fox["failed_pursuits"] = 0
+					fox["sprint_stamina"] = minf(stamina_capacity, float(fox["sprint_stamina"]) + float(cfg.get("meal_stamina_restore", 1.5)))
+					fox["is_sprinting"] = false
 					creature_fed.emit("fox", fox["id"], prey_id)
 					predation_succeeded.emit(fox["id"], prey_id, prey_position)
 					fox["capture_progress"] = 0.0
-				fox["target_id"] = -1
+				fox["hunt_time"] = 0.0
+				_set_fox_target(fox, -1)
 				_clear_ground_route(fox)
 				last_tick_stats["captures"] += 1
 		else:
 			fox["capture_progress"] = maxf(0.0, fox["capture_progress"] - delta * 0.7)
-	else:
+	if prey.is_empty():
 		fox["behavior"] = "wander"
-		fox["target_id"] = -1
+		fox["is_sprinting"] = false
+		_set_fox_target(fox, -1)
+		if float(fox["pursuit_rest_time"]) <= 0.0:
+			fox["hunt_time"] = 0.0
 		fox["capture_progress"] = 0.0
 		if int(fox.get("route_target_id", -1)) >= 0:
 			_clear_ground_route(fox)
@@ -757,7 +873,7 @@ func _rabbit_food_target_is_valid(rabbit: Dictionary) -> bool:
 	if target_id == -1 or not plants.has(target_id):
 		return false
 	var plant: Dictionary = plants[target_id]
-	if not plant_is_food_available(plant):
+	if not _plant_is_available_to_rabbit(rabbit, plant):
 		return false
 	# Plants and terrain do not move. Once a reachable route is selected, its
 	# cached distance remains sufficient for target retention; the waypoint
@@ -766,6 +882,14 @@ func _rabbit_food_target_is_valid(rabbit: Dictionary) -> bool:
 		and Vector2(rabbit.get("route_target_position", Vector2.INF)).is_equal_approx(plant["position"]):
 		return is_finite(float(rabbit.get("route_distance", INF)))
 	return bool(ground_route(rabbit["position"], plant["position"]).get("reachable", false))
+
+func _plant_is_available_to_rabbit(rabbit: Dictionary, plant: Dictionary) -> bool:
+	if plant_is_food_available(plant):
+		return true
+	var cfg: Dictionary = config["rabbit"]
+	return bool(cfg.get("emergency_grazing", true)) \
+		and float(rabbit["hunger"]) >= float(cfg["starvation_threshold"]) \
+		and float(plant.get("food", 0.0)) + 0.000001 >= float(cfg.get("minimum_food_bite", 0.45))
 
 func _set_rabbit_target(rabbit: Dictionary, target_id: int) -> void:
 	var previous_id: int = rabbit["target_id"]
@@ -835,15 +959,39 @@ func _best_reachable_threat(position: Vector2, radius: float) -> Dictionary:
 func _best_reachable_prey(fox: Dictionary, radius: float) -> Dictionary:
 	var position: Vector2 = fox["position"]
 	var best: Dictionary = {}
-	var best_distance := INF
+	var best_score := INF
+	var cfg: Dictionary = config["fox"]
 	for entry in query_nearby("rabbit", position, radius):
+		if int(entry["id"]) == int(fox.get("failed_target_id", -1)) and float(fox.get("failed_target_timer", 0.0)) > 0.0:
+			continue
 		var route := ground_route(position, entry["position"], radius)
 		if not bool(route["reachable"]):
 			continue
-		if float(route["distance"]) < best_distance:
-			best_distance = route["distance"]
+		var claims := int(fox_prey_target_claims.get(entry["id"], 0))
+		if int(fox.get("target_id", -1)) == int(entry["id"]):
+			claims = maxi(0, claims - 1)
+		var cover := terrain.thicket_cover(entry["position"])
+		var score := float(route["distance"]) \
+			+ float(claims) * float(cfg.get("prey_competition_penalty", 150.0)) \
+			+ cover * float(cfg.get("covered_prey_penalty", 52.0))
+		if score < best_score:
+			best_score = score
 			best = {"id": entry["id"], "position": entry["position"], "route": route}
 	return best
+
+func _set_fox_target(fox: Dictionary, target_id: int) -> void:
+	var previous_id := int(fox.get("target_id", -1))
+	if previous_id == target_id:
+		return
+	if previous_id != -1:
+		var remaining := int(fox_prey_target_claims.get(previous_id, 0)) - 1
+		if remaining > 0:
+			fox_prey_target_claims[previous_id] = remaining
+		else:
+			fox_prey_target_claims.erase(previous_id)
+	fox["target_id"] = target_id
+	if target_id != -1 and rabbits.has(target_id):
+		fox_prey_target_claims[target_id] = int(fox_prey_target_claims.get(target_id, 0)) + 1
 
 func _rabbit_separation(rabbit: Dictionary) -> Vector2:
 	var position: Vector2 = rabbit["position"]
@@ -869,6 +1017,25 @@ func _rabbit_separation(rabbit: Dictionary) -> Vector2:
 		steering += away * weight * weight
 	return steering.normalized() if steering.length_squared() > 1.0 else steering
 
+func _rabbit_food_candidates(rabbit: Dictionary) -> Dictionary:
+	var candidates: Dictionary = Dictionary(rabbit_shared_food_vision.get(rabbit["id"], {})).duplicate()
+	var cfg: Dictionary = config["rabbit"]
+	var failure_time := float(rabbit.get("forage_failure_time", 0.0))
+	var emergency_at := float(cfg.get("emergency_search_after", 3.0))
+	var is_critical := float(rabbit["hunger"]) >= float(cfg["starvation_threshold"])
+	if failure_time < emergency_at and not is_critical:
+		return candidates
+	for food_id in Dictionary(rabbit.get("food_memory", {})):
+		if plants.has(food_id) and _plant_is_available_to_rabbit(rabbit, plants[food_id]):
+			candidates[food_id] = true
+	var radius_factor := float(cfg.get("critical_search_radius_factor", 4.0)) if is_critical \
+		else float(cfg.get("emergency_search_radius_factor", 2.6))
+	var search_radius := minf(world_radius * 2.0, float(cfg["food_detection_radius"]) * radius_factor)
+	for entry in query_nearby("plant", rabbit["position"], search_radius):
+		if plants.has(entry["id"]) and _plant_is_available_to_rabbit(rabbit, plants[entry["id"]]):
+			candidates[entry["id"]] = true
+	return candidates
+
 func _best_food_target(rabbit: Dictionary, visible_food: Dictionary) -> Dictionary:
 	var position: Vector2 = rabbit["position"]
 	var cfg: Dictionary = config["rabbit"]
@@ -878,7 +1045,7 @@ func _best_food_target(rabbit: Dictionary, visible_food: Dictionary) -> Dictiona
 		if not plants.has(food_id):
 			continue
 		var plant: Dictionary = plants[food_id]
-		if not plant_is_food_available(plant):
+		if not _plant_is_available_to_rabbit(rabbit, plant):
 			continue
 		var route := ground_route(position, plant["position"])
 		if not bool(route["reachable"]):
@@ -886,9 +1053,11 @@ func _best_food_target(rabbit: Dictionary, visible_food: Dictionary) -> Dictiona
 		var claims: int = rabbit_food_target_claims.get(plant["id"], 0)
 		if rabbit["target_id"] == plant["id"]:
 			claims = maxi(0, claims - 1)
-		# Food choice is intentionally legible: nearest reachable usable patch wins,
-		# with only a small crowding cost to keep a whole colony from piling onto one.
-		var score: float = float(route["distance"]) + float(claims) * float(cfg["food_crowding_penalty"])
+		# Distance remains the leading signal, while fuller patches and existing
+		# diners prevent the colony from repeatedly draining the same nearest scrap.
+		var stock_bonus := plant_stock_ratio(plant) * float(cfg.get("food_stock_preference", 38.0))
+		var score: float = float(route["distance"]) \
+			+ float(claims) * float(cfg["food_crowding_penalty"]) - stock_bonus
 		if score < best_score:
 			best_score = score
 			best = {"id": plant["id"], "position": plant["position"], "route": route}
@@ -904,6 +1073,12 @@ func _consume_plant(rabbit: Dictionary, plant: Dictionary, delta: float) -> void
 	_update_plant_ecology_state(plant)
 	rabbit["hunger"] = maxf(0.0, rabbit["hunger"] - amount * cfg["food_value"])
 	rabbit["recent_food"] += amount * cfg["food_value"]
+	rabbit["starvation_time"] = maxf(0.0, float(rabbit["starvation_time"]) - amount * float(cfg.get("feeding_starvation_relief", 1.5)))
+	rabbit["forage_failure_time"] = 0.0
+	rabbit["last_fed_position"] = plant["position"]
+	var memory: Dictionary = rabbit.get("food_memory", {})
+	memory[plant["id"]] = simulation_time
+	rabbit["food_memory"] = memory
 	rabbit["behavior"] = "eat"
 	plant_eaten.emit(plant["id"], plant["position"])
 	creature_fed.emit("rabbit", rabbit["id"], plant["id"])
@@ -912,7 +1087,7 @@ func _update_mortality(entity: Dictionary, cfg: Dictionary, delta: float) -> boo
 	if entity["hunger"] >= cfg["starvation_threshold"]:
 		entity["starvation_time"] += delta
 	else:
-		entity["starvation_time"] = maxf(0.0, entity["starvation_time"] - delta * 0.45)
+		entity["starvation_time"] = maxf(0.0, entity["starvation_time"] - delta * float(cfg.get("starvation_recovery_rate", 0.45)))
 	return entity["starvation_time"] >= cfg["starvation_duration"] or entity["age"] >= entity["lifespan"]
 
 func _process_rabbit_reproduction() -> void:
@@ -920,13 +1095,11 @@ func _process_rabbit_reproduction() -> void:
 	if rabbits.size() >= int(cfg["max_population"]):
 		return
 	var paired: Dictionary = {}
-	var births: Array = []
+	var births: Array[Vector2] = []
 	for entity_id in rabbits.keys():
 		if paired.has(entity_id) or not _rabbit_is_eligible(rabbits[entity_id]):
 			continue
 		var rabbit: Dictionary = rabbits[entity_id]
-		if _local_available_food(rabbit["position"], cfg["mating_radius"]) < cfg["local_food_needed"]:
-			continue
 		var mate_id := -1
 		for entry in query_nearby("rabbit", rabbit["position"], cfg["mating_radius"]):
 			if entry["id"] == entity_id or paired.has(entry["id"]) or not rabbits.has(entry["id"]):
@@ -937,18 +1110,33 @@ func _process_rabbit_reproduction() -> void:
 				break
 		if mate_id == -1:
 			continue
+		var mate: Dictionary = rabbits[mate_id]
+		var midpoint: Vector2 = (rabbit["position"] + mate["position"]) * 0.5
+		var litter := rng.randi_range(int(cfg["birth_litter_min"]), int(cfg["birth_litter_max"]))
+		if not _local_forage_can_support_births(midpoint, litter, births):
+			continue
+		var child_positions: Array[Vector2] = []
+		for child_index in range(litter):
+			if rabbits.size() + births.size() + child_positions.size() >= int(cfg["max_population"]):
+				break
+			var child_position := _nearby_valid_position(midpoint, 10.0 + child_index * 4.0)
+			if child_position != Vector2.INF:
+				child_positions.append(child_position)
+		if child_positions.is_empty():
+			continue
+		var biomass_cost := float(cfg.get("reproduction_biomass_cost", 0.0)) * float(child_positions.size())
+		if _consume_local_biomass(midpoint, float(cfg.get("reproduction_resource_radius", cfg["mating_radius"])), biomass_cost) + 0.000001 < biomass_cost:
+			continue
 		paired[entity_id] = true
 		paired[mate_id] = true
 		rabbit["reproduction_cooldown"] = cfg["reproduction_cooldown"]
-		rabbits[mate_id]["reproduction_cooldown"] = cfg["reproduction_cooldown"]
-		rabbit["recent_food"] *= 0.35
-		rabbits[mate_id]["recent_food"] *= 0.35
-		var litter := rng.randi_range(int(cfg["birth_litter_min"]), int(cfg["birth_litter_max"]))
-		for child_index in range(litter):
-			if rabbits.size() + births.size() >= int(cfg["max_population"]):
-				break
-			var midpoint: Vector2 = (rabbit["position"] + rabbits[mate_id]["position"]) * 0.5
-			births.append(_nearby_valid_position(midpoint, 10.0 + child_index * 4.0))
+		mate["reproduction_cooldown"] = cfg["reproduction_cooldown"]
+		var energy_cost := float(cfg.get("reproduction_parent_energy_cost", 0.0))
+		var hunger_cost := float(cfg.get("reproduction_parent_hunger_cost", 0.0))
+		for parent in [rabbit, mate]:
+			parent["recent_food"] = maxf(0.0, float(parent["recent_food"]) - energy_cost)
+			parent["hunger"] = minf(float(cfg["starvation_threshold"]), float(parent["hunger"]) + hunger_cost)
+		births.append_array(child_positions)
 	for position in births:
 		if position != Vector2.INF:
 			add_rabbit(position, "birth")
@@ -981,13 +1169,23 @@ func _process_fox_reproduction() -> void:
 				break
 		if mate_id == -1:
 			continue
+		var midpoint: Vector2 = (fox["position"] + foxes[mate_id]["position"]) * 0.5
+		var resource_radius := float(cfg.get("reproduction_resource_radius", cfg["mating_radius"]))
+		var local_prey := _local_reachable_count("rabbit", midpoint, resource_radius)
+		var local_foxes := _local_reachable_count("fox", midpoint, resource_radius)
+		var pending_local := 0
+		for birth_position in births:
+			if midpoint.distance_to(birth_position) <= resource_radius:
+				pending_local += 1
+		var required_prey := float(local_foxes + pending_local + 1) * float(cfg.get("reproduction_prey_per_fox", 0.0))
+		if float(local_prey) < required_prey:
+			continue
 		paired[entity_id] = true
 		paired[mate_id] = true
 		fox["reproduction_cooldown"] = cfg["reproduction_cooldown"]
 		foxes[mate_id]["reproduction_cooldown"] = cfg["reproduction_cooldown"]
 		fox["recent_food"] *= 0.25
 		foxes[mate_id]["recent_food"] *= 0.25
-		var midpoint: Vector2 = (fox["position"] + foxes[mate_id]["position"]) * 0.5
 		births.append(_nearby_valid_position(midpoint, 15.0))
 	for position in births:
 		if position != Vector2.INF:
@@ -1000,6 +1198,113 @@ func _fox_is_eligible(fox: Dictionary) -> bool:
 		and fox["hunger"] <= cfg["reproduction_hunger_max"] \
 		and fox["recent_food"] >= cfg["reproduction_food_needed"] \
 		and fox["reproduction_cooldown"] <= 0.0
+
+func _local_forage_can_support_births(position: Vector2, birth_count: int, pending_births: Array[Vector2]) -> bool:
+	var cfg: Dictionary = config["rabbit"]
+	var radius := float(cfg.get("reproduction_resource_radius", cfg["mating_radius"]))
+	var budget := local_forage_budget(position, radius)
+	if float(budget["available_food"]) < maxf(float(cfg["local_food_needed"]), float(cfg.get("reproduction_biomass_cost", 0.0)) * birth_count):
+		return false
+	if float(budget["stock_ratio"]) < float(cfg.get("reproduction_min_stock_ratio", 0.0)):
+		return false
+	var pending_local := 0
+	for birth_position in pending_births:
+		if position.distance_to(birth_position) <= radius:
+			pending_local += 1
+	var projected_demand := int(budget["rabbit_count"]) + pending_local + birth_count
+	if projected_demand > int(floor(float(budget["sustainable_rabbits"]))):
+		return false
+	# Local ranges overlap, so a colony split between two patches could otherwise
+	# count the same forage twice and still overshoot the meadow as a whole.
+	var ecosystem_budget := ecosystem_forage_budget()
+	var projected_population := rabbits.size() + pending_births.size() + birth_count
+	return float(ecosystem_budget["stock_ratio"]) >= float(cfg.get("reproduction_min_stock_ratio", 0.0)) \
+		and projected_population <= int(floor(float(ecosystem_budget["sustainable_rabbits"])))
+
+func ecosystem_forage_budget() -> Dictionary:
+	var total_food := 0.0
+	var total_capacity := 0.0
+	var renewable_biomass_per_second := 0.0
+	for plant in plants.values():
+		total_food += float(plant["food"])
+		total_capacity += float(plant["max_food"])
+		renewable_biomass_per_second += float(plant["regeneration"]) * float(plant.get("habitat_suitability", 1.0))
+	var cfg: Dictionary = config["rabbit"]
+	var sustainable_rabbits := renewable_biomass_per_second * float(cfg["food_value"]) \
+		/ maxf(0.001, float(cfg["hunger_rate"])) * float(cfg.get("reproduction_capacity_utilization", 1.0))
+	return {
+		"total_food": total_food,
+		"total_capacity": total_capacity,
+		"stock_ratio": total_food / total_capacity if total_capacity > 0.0 else 0.0,
+		"renewable_biomass_per_second": renewable_biomass_per_second,
+		"sustainable_rabbits": sustainable_rabbits,
+		"rabbit_count": rabbits.size(),
+	}
+
+func local_forage_budget(position: Vector2, radius: float) -> Dictionary:
+	var available_food := 0.0
+	var total_food := 0.0
+	var total_capacity := 0.0
+	var renewable_biomass_per_second := 0.0
+	for entry in query_nearby("plant", position, radius):
+		if not plants.has(entry["id"]):
+			continue
+		var plant: Dictionary = plants[entry["id"]]
+		if ground_route_distance(position, plant["position"], radius) > radius:
+			continue
+		total_food += float(plant["food"])
+		total_capacity += float(plant["max_food"])
+		if plant_is_food_available(plant):
+			available_food += float(plant["food"])
+		renewable_biomass_per_second += float(plant["regeneration"]) * float(plant.get("habitat_suitability", 1.0))
+	var rabbit_count := _local_reachable_count("rabbit", position, radius)
+	var cfg: Dictionary = config["rabbit"]
+	var sustainable_rabbits := renewable_biomass_per_second * float(cfg["food_value"]) \
+		/ maxf(0.001, float(cfg["hunger_rate"])) * float(cfg.get("reproduction_capacity_utilization", 1.0))
+	return {
+		"available_food": available_food,
+		"total_food": total_food,
+		"total_capacity": total_capacity,
+		"stock_ratio": total_food / total_capacity if total_capacity > 0.0 else 0.0,
+		"renewable_biomass_per_second": renewable_biomass_per_second,
+		"sustainable_rabbits": sustainable_rabbits,
+		"rabbit_count": rabbit_count,
+	}
+
+func _local_reachable_count(kind: String, position: Vector2, radius: float) -> int:
+	var count := 0
+	for entry in query_nearby(kind, position, radius):
+		if ground_route_distance(position, entry["position"], radius) <= radius:
+			count += 1
+	return count
+
+func _consume_local_biomass(position: Vector2, radius: float, amount: float) -> float:
+	if amount <= 0.0:
+		return 0.0
+	var remaining := amount
+	var candidates: Array[Dictionary] = []
+	for entry in query_nearby("plant", position, radius):
+		if not plants.has(entry["id"]):
+			continue
+		var plant: Dictionary = plants[entry["id"]]
+		if plant_is_food_available(plant) and ground_route_distance(position, plant["position"], radius) <= radius:
+			candidates.append(plant)
+	while remaining > 0.000001 and not candidates.is_empty():
+		var best_index := 0
+		var best_ratio := -1.0
+		for index in range(candidates.size()):
+			var ratio := plant_stock_ratio(candidates[index])
+			if ratio > best_ratio:
+				best_ratio = ratio
+				best_index = index
+		var plant: Dictionary = candidates[best_index]
+		var consumed := minf(remaining, float(plant["food"]))
+		plant["food"] -= consumed
+		remaining -= consumed
+		_update_plant_ecology_state(plant)
+		plant_eaten.emit(plant["id"], plant["position"])
+		candidates.remove_at(best_index)
+	return amount - remaining
 
 func _local_available_food(position: Vector2, radius: float) -> float:
 	var total := 0.0
@@ -1059,10 +1364,14 @@ func debug_entity(kind: String, entity_id: int) -> Dictionary:
 		"id": entity["id"],
 		"type": kind,
 		"hunger": entity["hunger"],
+		"starvation_time": entity["starvation_time"],
 		"age": entity["age"],
 		"behavior": entity["behavior"],
 		"target_id": entity["target_id"],
 		"reproduction_cooldown": entity["reproduction_cooldown"],
+		"flee_stamina": float(entity.get("flee_stamina", 0.0)),
+		"sprint_stamina": float(entity.get("sprint_stamina", 0.0)),
+		"failed_pursuits": int(entity.get("failed_pursuits", 0)),
 		"nearby": nearby,
 		"terrain": terrain_debug(entity["position"]),
 		"refuge_position": entity.get("refuge_position", Vector2.INF),
