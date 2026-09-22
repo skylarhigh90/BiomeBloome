@@ -4,3 +4,4 @@
 builds/*
 !builds/.gdignore
 .itchio.env
+docs/**/*.import
