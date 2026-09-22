@@ -1,0 +1,125 @@
+{
+  "live_verified_forced": {
+    "first_simulation_time": 0.2,
+    "last_simulation_time": 296.299999999999,
+    "telemetry_samples": 2388,
+    "captures": 1342,
+    "sampled_capture_hashes": 45,
+    "unique_sampled_captures": 45,
+    "focal_first_120_seconds": {
+      "wander": {
+        "samples": 1,
+        "median_speed": 13.299999634262855,
+        "fraction_speed_below_1": 0.0
+      },
+      "seek_food": {
+        "samples": 96,
+        "median_speed": 32.66730983647384,
+        "fraction_speed_below_1": 0.0
+      },
+      "eat": {
+        "samples": 41,
+        "median_speed": 40.31862457241363,
+        "fraction_speed_below_1": 0.0
+      },
+      "loaf": {
+        "samples": 253,
+        "median_speed": 5.152747530160223,
+        "fraction_speed_below_1": 0.003952569169960474
+      },
+      "socialize": {
+        "samples": 574,
+        "median_speed": 7.414762204264144,
+        "fraction_speed_below_1": 0.0
+      }
+    }
+  },
+  "predator_verified_forced": {
+    "first_simulation_time": 0.2,
+    "last_simulation_time": 180.199999999994,
+    "telemetry_samples": 1351,
+    "captures": 1351,
+    "sampled_capture_hashes": 46,
+    "unique_sampled_captures": 46,
+    "focal_state_transitions": [
+      {
+        "t": 0.2,
+        "behavior": "wander",
+        "failed_pursuits": 0,
+        "meals": 0
+      },
+      {
+        "t": 0.3,
+        "behavior": "hunt",
+        "failed_pursuits": 0,
+        "meals": 0
+      },
+      {
+        "t": 24.2000000000001,
+        "behavior": "wander",
+        "failed_pursuits": 1,
+        "meals": 0
+      },
+      {
+        "t": 27.8000000000001,
+        "behavior": "hunt",
+        "failed_pursuits": 1,
+        "meals": 0
+      },
+      {
+        "t": 51.6000000000005,
+        "behavior": "wander",
+        "failed_pursuits": 2,
+        "meals": 0
+      },
+      {
+        "t": 55.1000000000005,
+        "behavior": "hunt",
+        "failed_pursuits": 2,
+        "meals": 0
+      },
+      {
+        "t": 63.0000000000006,
+        "behavior": "hunt",
+        "failed_pursuits": 0,
+        "meals": 1
+      },
+      {
+        "t": 63.1000000000006,
+        "behavior": "wander",
+        "failed_pursuits": 0,
+        "meals": 1
+      },
+      {
+        "t": 124.199999999997,
+        "behavior": "hunt",
+        "failed_pursuits": 0,
+        "meals": 1
+      },
+      {
+        "t": 147.999999999996,
+        "behavior": "wander",
+        "failed_pursuits": 1,
+        "meals": 1
+      },
+      {
+        "t": 151.499999999996,
+        "behavior": "hunt",
+        "failed_pursuits": 1,
+        "meals": 1
+      },
+      {
+        "t": 174.299999999994,
+        "behavior": "hunt",
+        "failed_pursuits": 0,
+        "meals": 2
+      },
+      {
+        "t": 174.399999999994,
+        "behavior": "wander",
+        "failed_pursuits": 0,
+        "meals": 2
+      }
+    ]
+  }
+}

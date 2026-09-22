@@ -1,0 +1,30 @@
+{
+  "frames": 240,
+  "unique_frame_hashes": 240,
+  "fps": 30,
+  "seconds": 8,
+  "pause_pose_unchanged": true,
+  "pause_simulation_time_unchanged": true,
+  "capture_waits_for_deferred_draw": true,
+  "behavior_samples": {
+    "rabbit": [
+      "eat",
+      "forage",
+      "return_home",
+      "seek_food",
+      "socialize",
+      "wander"
+    ],
+    "fox": [
+      "wander"
+    ]
+  },
+  "paused_fox_crop_yavg_difference": 0.0,
+  "paused_fox_crop_ymax_difference": 0.0,
+  "paused_fox_crop_rect": [
+    584,
+    352,
+    104,
+    96
+  ]
+}

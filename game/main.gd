@@ -1,5 +1,7 @@
 extends Node2D
 
+const AudioDirector = preload("res://game/meadow_audio_director.gd")
+
 const CAMERA_ZOOM_MIN := 0.46
 const CAMERA_ZOOM_MAX := 1.90
 const CAMERA_MANUAL_RESPONSE := 5.2
@@ -8,7 +10,7 @@ const CAMERA_RESIZE_RESPONSE := 3.4
 # Mini Motorways, not a cut to a new overview. This response takes roughly
 # twenty seconds to settle without ever interrupting play.
 const CAMERA_EXPANSION_RESPONSE := 0.18
-const DESKTOP_TERRAIN_HEIGHT_COVERAGE := 1.08
+const DESKTOP_TERRAIN_HEIGHT_COVERAGE := 1.24
 const DESKTOP_TERRAIN_WIDTH_COVERAGE := 0.84
 
 var config: Dictionary
@@ -16,6 +18,7 @@ var systems: GameSystems
 var world_view: WorldView
 var camera: Camera2D
 var hud: GameHUD
+var audio_director: Node
 var camera_zoom_target := 1.0
 var camera_zoom_response := CAMERA_RESIZE_RESPONSE
 var camera_manual_cooldown := 0.0
@@ -23,10 +26,18 @@ var dragging_camera := false
 var debug_enabled := false
 var debug_selected_kind := ""
 var debug_selected_id := -1
+var selected_animal_kind := ""
+var selected_animal_id := -1
+var followed_animal_kind := ""
+var followed_animal_id := -1
 
 func _ready() -> void:
 	config = GameConfig.make()
 	systems = GameSystems.new(config)
+	audio_director = AudioDirector.new()
+	audio_director.name = "MeadowAudio"
+	add_child(audio_director)
+	audio_director.setup(systems)
 	world_view = WorldView.new()
 	world_view.name = "WorldView"
 	add_child(world_view)
@@ -51,10 +62,19 @@ func _ready() -> void:
 	hud.supply_selected.connect(_on_supply_selected)
 	hud.restart_requested.connect(_on_restart_requested)
 	hud.continue_requested.connect(_on_continue_requested)
+	hud.animal_follow_requested.connect(_on_animal_follow_requested)
+	hud.animal_inspected.connect(_on_animal_inspected)
+	hud.animal_inspector_closed.connect(_on_animal_inspector_closed)
+	hud.undo_requested.connect(_on_undo_requested)
+	hud.transplant_requested.connect(_on_transplant_requested)
+	hud.remove_food_requested.connect(_on_remove_food_requested)
+	hud.audio_toggled.connect(_on_audio_toggled)
 	systems.world_expanded.connect(_on_world_expanded)
+	systems.simulation.entity_removed.connect(_on_entity_removed)
 
 	get_viewport().size_changed.connect(_on_viewport_size_changed)
 	_update_placement_preview()
+	hud.set_audio_enabled(audio_director.enabled)
 
 func _process(delta: float) -> void:
 	systems.advance(delta)
@@ -72,8 +92,16 @@ func _update_camera(delta: float) -> void:
 		dragging_camera = false
 	var input_direction := Input.get_vector("pan_left", "pan_right", "pan_up", "pan_down") if camera_input_enabled else Vector2.ZERO
 	if input_direction.length_squared() > 0.0:
+		_stop_following()
 		camera.position += input_direction * 330.0 / camera.zoom.x * delta
 		camera_manual_cooldown = 4.0
+	elif followed_animal_id != -1:
+		var source: Dictionary = systems.simulation.rabbits if followed_animal_kind == "rabbit" else systems.simulation.foxes
+		if source.has(followed_animal_id):
+			var target_position: Vector2 = source[followed_animal_id]["position"]
+			camera.position = camera.position.lerp(target_position, 1.0 - exp(-delta * 3.6))
+		else:
+			_stop_following()
 	var zoom_value := lerpf(camera.zoom.x, camera_zoom_target, 1.0 - exp(-delta * camera_zoom_response))
 	camera.zoom = Vector2.ONE * zoom_value
 	world_view.set_camera_zoom(zoom_value)
@@ -122,7 +150,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode == KEY_ESCAPE:
-			systems.clear_selection()
+			if systems.transplant_mode:
+				systems.cancel_transplant()
+			else:
+				systems.clear_selection()
+				hud.hide_animal()
+				_stop_following()
+			_update_placement_preview()
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode == KEY_SPACE:
@@ -136,6 +170,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+			_stop_following()
 			var factor := 1.12 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.12
 			camera_zoom_target = clampf(camera_zoom_target * factor, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX)
 			camera_zoom_response = CAMERA_MANUAL_RESPONSE
@@ -144,7 +179,25 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			var world_position := get_global_mouse_position()
-			if not systems.selected_item.is_empty():
+			if systems.remove_food_mode:
+				var plant_id := _nearest_plant(world_position)
+				if plant_id != -1 and world_view.is_position_revealed(systems.simulation.plants[plant_id]["position"]) and systems.remove_food(plant_id):
+					hud.show_toast("Food removed · nothing returned to your satchel", 2.4)
+				hud.refresh()
+				_update_placement_preview()
+				get_viewport().set_input_as_handled()
+			elif systems.transplant_mode:
+				if systems.transplant_source_id == -1:
+					var plant_id := _nearest_plant(world_position)
+					if plant_id != -1:
+						systems.choose_transplant_source(plant_id)
+				else:
+					if world_view.is_position_revealed(world_position) and systems.complete_transplant(world_position):
+						hud.show_toast("Plant moved · new growth will take time", 2.4)
+				hud.refresh()
+				_update_placement_preview()
+				get_viewport().set_input_as_handled()
+			elif not systems.selected_item.is_empty():
 				var placed_id := -1
 				if world_view.is_position_revealed(world_position):
 					placed_id = systems.place_item(systems.selected_item, world_position)
@@ -152,10 +205,17 @@ func _unhandled_input(event: InputEvent) -> void:
 					hud.refresh()
 				_update_placement_preview()
 				get_viewport().set_input_as_handled()
-			elif debug_enabled:
-				_select_debug_entity(world_position)
+			else:
+				var selected := _select_public_animal(world_position)
+				if debug_enabled:
+					_select_debug_entity(world_position)
+				if selected or debug_enabled:
+					get_viewport().set_input_as_handled()
+				elif selected_animal_id != -1:
+					hud.hide_animal()
 				get_viewport().set_input_as_handled()
 	if event is InputEventMouseMotion and dragging_camera:
+		_stop_following()
 		camera.position -= event.relative / camera.zoom.x
 		camera_manual_cooldown = 7.0
 		get_viewport().set_input_as_handled()
@@ -200,6 +260,7 @@ func _on_inventory_selected(item: String) -> void:
 	if systems.selected_item == item:
 		systems.clear_selection()
 	else:
+		systems.cancel_transplant()
 		systems.select_item(item)
 	_update_placement_preview()
 
@@ -227,8 +288,25 @@ func _update_placement_preview() -> void:
 		return
 	var item := systems.selected_item
 	var position := get_global_mouse_position()
-	var valid := world_view.is_position_revealed(position) and systems.can_place(item, position)
-	world_view.set_placement_preview(item, position, valid, not item.is_empty() and not systems.supply_pending)
+	world_view.removal_target_id = -1
+	if systems.remove_food_mode and not systems.supply_pending:
+		var plant_id := _nearest_plant(position)
+		if plant_id != -1 and world_view.is_position_revealed(systems.simulation.plants[plant_id]["position"]):
+			world_view.removal_target_id = plant_id
+	var source_id := -1
+	if systems.transplant_mode and systems.transplant_source_id != -1 and systems.simulation.plants.has(systems.transplant_source_id):
+		source_id = systems.transplant_source_id
+		item = str(systems.simulation.plants[source_id]["type"])
+	var assessment := systems.placement_assessment(item, position, source_id)
+	var valid := world_view.is_position_revealed(position) and bool(assessment.get("valid", false))
+	if source_id == -1:
+		valid = valid and systems.can_place(item, position)
+	else:
+		valid = valid and systems.simulation.can_transplant_plant(source_id, position)
+	var visible := not item.is_empty() and not systems.supply_pending and (not systems.transplant_mode or source_id != -1)
+	world_view.set_placement_preview(item, position, valid, visible, str(assessment.get("quality", "invalid")))
+	if visible:
+		hud.set_placement_guidance(assessment)
 
 func _toggle_debug() -> void:
 	debug_enabled = not debug_enabled
@@ -255,6 +333,97 @@ func _select_debug_entity(position: Vector2) -> void:
 	debug_selected_id = nearest_id
 	world_view.set_debug_selection(nearest_kind, nearest_id)
 
+func _select_public_animal(position: Vector2) -> bool:
+	var nearest_kind := ""
+	var nearest_id := -1
+	var nearest_distance := pow(32.0 / maxf(0.01, camera.zoom.x), 2.0)
+	for kind in ["rabbit", "fox"]:
+		var source: Dictionary = systems.simulation.rabbits if kind == "rabbit" else systems.simulation.foxes
+		for entity in source.values():
+			var distance: float = position.distance_squared_to(entity["position"])
+			if distance < nearest_distance:
+				nearest_distance = distance
+				nearest_kind = kind
+				nearest_id = int(entity["id"])
+	if nearest_id == -1:
+		return false
+	selected_animal_kind = nearest_kind
+	selected_animal_id = nearest_id
+	world_view.set_public_selection(nearest_kind, nearest_id)
+	hud.show_animal(nearest_kind, nearest_id)
+	return true
+
+func _nearest_plant(position: Vector2) -> int:
+	var nearest_id := -1
+	var nearest_distance := pow(30.0 / maxf(0.01, camera.zoom.x), 2.0)
+	for plant in systems.simulation.plants.values():
+		var distance: float = position.distance_squared_to(plant["position"])
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest_id = int(plant["id"])
+	return nearest_id
+
+func _on_animal_inspected(kind: String, entity_id: int) -> void:
+	var living := systems.simulation.rabbits if kind == "rabbit" else systems.simulation.foxes
+	selected_animal_kind = kind if living.has(entity_id) else ""
+	selected_animal_id = entity_id if living.has(entity_id) else -1
+	world_view.set_public_selection(selected_animal_kind, selected_animal_id)
+
+func _on_animal_follow_requested(kind: String, entity_id: int) -> void:
+	if followed_animal_kind == kind and followed_animal_id == entity_id:
+		_stop_following()
+	else:
+		followed_animal_kind = kind
+		followed_animal_id = entity_id
+		hud.set_followed_animal(kind, entity_id)
+
+func _stop_following() -> void:
+	followed_animal_kind = ""
+	followed_animal_id = -1
+	if hud != null:
+		hud.set_followed_animal("", -1)
+
+func _on_animal_inspector_closed() -> void:
+	selected_animal_kind = ""
+	selected_animal_id = -1
+	world_view.set_public_selection("", -1)
+	_stop_following()
+
+func _on_entity_removed(kind: String, entity_id: int, _position: Vector2, _cause: String) -> void:
+	if kind == selected_animal_kind and entity_id == selected_animal_id:
+		selected_animal_kind = ""
+		selected_animal_id = -1
+		world_view.set_public_selection("", -1)
+	if kind == followed_animal_kind and entity_id == followed_animal_id:
+		_stop_following()
+
+func _on_undo_requested() -> void:
+	if systems.undo_last_placement():
+		hud.show_toast("Placement undone · returned to your satchel", 2.0)
+	hud.refresh()
+	_update_placement_preview()
+
+func _on_remove_food_requested() -> void:
+	if systems.remove_food_mode:
+		systems.cancel_remove_food()
+	else:
+		systems.begin_remove_food()
+	hud.refresh()
+	_update_placement_preview()
+
+func _on_transplant_requested() -> void:
+	if systems.transplant_mode:
+		systems.cancel_transplant()
+	else:
+		if systems.begin_transplant():
+			hud.show_toast("Choose a plant, then choose its new home", 2.6)
+	hud.refresh()
+	_update_placement_preview()
+
+func _on_audio_toggled() -> void:
+	audio_director.set_enabled(not audio_director.enabled)
+	hud.set_audio_enabled(audio_director.enabled)
+
 func _update_debug_panel() -> void:
 	var sim := systems.simulation
 	var forage: Dictionary = sim.ecosystem_forage_budget()
@@ -277,6 +446,8 @@ func _update_debug_panel() -> void:
 			if debug_selected_kind == "rabbit":
 				lines.append("Target %s · Local food %d · Shared food %d · Flee %.1f" % [str(data["target_id"]), int(data["nearby"]["food"]), int(data["nearby"]["shared_food"]), data["flee_stamina"]])
 				lines.append("Social group %d · Nearby foxes %d" % [int(data["nearby"]["social_group"]), int(data["nearby"]["predators"])])
+				if data["home_position"] != Vector2.INF:
+					lines.append("Home %s · distance %.1f · hungry away %.1fs" % [str(data["home_position"]), Vector2(data["home_position"]).distance_to(sim.rabbits[debug_selected_id]["position"]), data["home_hungry_time"]])
 			else:
 				lines.append("Target %s · Nearby prey %d · Sprint %.1f · Learned %d" % [str(data["target_id"]), int(data["nearby"]["prey"]), data["sprint_stamina"], int(data["failed_pursuits"])])
 			var terrain_data: Dictionary = data["terrain"]

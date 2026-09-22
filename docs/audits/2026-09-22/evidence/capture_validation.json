@@ -1,0 +1,47 @@
+{
+  "rendered_frames": 240,
+  "unique_frame_hashes": 240,
+  "playback_fps": 30,
+  "clip_seconds": 8,
+  "staged_map_radii": [
+    360,
+    744
+  ],
+  "motion_simulation_time_end": 16.0,
+  "behaviors": {
+    "rabbit": [
+      "eat",
+      "forage",
+      "return_home",
+      "seek_food",
+      "socialize",
+      "wander"
+    ],
+    "fox": [
+      "wander"
+    ]
+  },
+  "pause_samples": [
+    {
+      "paused_frame": 252,
+      "simulation_time": 16.0,
+      "tail_offset": 0.858519717677366,
+      "velocity": "(0.0, 0.0)",
+      "visual_clock": 8.03333333333332
+    },
+    {
+      "paused_frame": 267,
+      "simulation_time": 16.0,
+      "tail_offset": 2.08122768177924,
+      "velocity": "(0.0, 0.0)",
+      "visual_clock": 8.53333333333331
+    },
+    {
+      "paused_frame": 282,
+      "simulation_time": 16.0,
+      "tail_offset": -0.564079273192504,
+      "velocity": "(0.0, 0.0)",
+      "visual_clock": 9.03333333333331
+    }
+  ]
+}

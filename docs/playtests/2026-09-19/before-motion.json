@@ -1,0 +1,26 @@
+{
+  "births": 5,
+  "duration": 120.0,
+  "median_eating_bout": 0.4,
+  "overlap_sample_fraction": 0.332340425531915,
+  "rabbits": 11,
+  "seed": 240817,
+  "starvation": 1,
+  "states": {
+    "eat": {
+      "median_speed": 30.406436920166,
+      "samples": 499,
+      "stationary_fraction": 0.00200400801603206
+    },
+    "loaf": {
+      "median_speed": 3.85644733905792,
+      "samples": 4679,
+      "stationary_fraction": 0.0581320795041676
+    },
+    "socialize": {
+      "median_speed": 4.56381499767303,
+      "samples": 5383,
+      "stationary_fraction": 0.0518298346646851
+    }
+  }
+}

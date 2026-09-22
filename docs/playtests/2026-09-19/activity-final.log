@@ -1,0 +1,21 @@
+ERROR: Failed to open 'user://logs/godot2026-09-19T01.02.45.log'.
+   at: copy (core/io/dir_access.cpp:429)
+ERROR: Failed to open log file for writing: user://logs/godot.log
+   at: rotate_file (core/io/logger.cpp:169)
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+ERROR: Condition "ret != noErr" is true. Returning: ""
+   at: get_system_ca_certificates (platform/macos/os_macos.mm:1035)
+PASS: a sustained feeding bout has no physical drift
+PASS: one feeding visit counts once and spends real biomass
+PASS: danger interrupts feeding on the next simulation step
+PASS: field notes describe the active action
+PASS: safe home time includes sustained stationary rest
+PASS: co-located resting rabbits separate their silhouettes
+PASS: 1x and 3x agree on travel and gait at equal simulation time
+PASS: travel advances the fixed-step gait
+PASS: pause freezes gait and facing
+PASS: transplant invalidates an old feeding site before another bite
+PASS: placement explains missing companions before the player commits
+PASS: the third-home act gives the player three placeable nursery starters
+12 activity tests passed; 0 failed.

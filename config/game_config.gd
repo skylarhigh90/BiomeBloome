@@ -3,7 +3,7 @@ extends RefCounted
 
 const WORLD_EXPANSION_STEP := 48.0
 
-## Focused five-checkpoint progression plus terrain and balance values live here.
+## Focused six-act progression plus terrain and balance values live here.
 static func make() -> Dictionary:
 	return {
 		"simulation": {
@@ -30,14 +30,14 @@ static func make() -> Dictionary:
 			"wander_turn_response": 2.8,
 			"wander_noise_interval_min": 0.45,
 			"wander_noise_interval_max": 1.25,
-			"personal_space_min": 20.0,
-			"personal_space_max": 30.0,
+			"personal_space_min": 28.0,
+			"personal_space_max": 36.0,
 			"separation_strength": 0.58,
 			"food_crowding_penalty": 26.0,
 			"food_stock_preference": 38.0,
 			# One complete fixed-step bite. Smaller scraps do not count as a usable
 			# meal even before a patch crosses its depletion threshold.
-			"minimum_food_bite": 0.45,
+			"minimum_food_bite": 0.12,
 			"hunger_rate": 1.45,
 			# Rabbits begin looking before they are in visible distress. Hunger still
 			# controls appetite, but food should be a noticeable influence on movement.
@@ -62,13 +62,35 @@ static func make() -> Dictionary:
 			# social group. Keep this smaller than food vision so social awareness is
 			# earned by staying together rather than being global by default.
 			"social_proximity_radius": 50.0,
+			# A Rabbit's first dependable meal becomes its home. Nearby diners share
+			# that anchor, producing stable local colonies without global flocking.
+			"home_join_radius": 82.0,
+			"home_loaf_radius": 34.0,
+			"home_return_radius": 62.0,
+			"home_loaf_speed_factor": 0.24,
+			"home_return_speed_factor": 0.78,
+			# Ready adults gather more tightly at home, so mating follows residency
+			# instead of depending on two random wander paths crossing.
+			"home_mating_radius": 24.0,
+			"home_mating_speed_factor": 0.38,
+			# A temporary empty patch should not erase a home. After enough cumulative
+			# hungry time, a meal well outside the home range can establish a new one.
+			"home_relocation_hungry_time": 24.0,
+			"home_relocation_distance": 110.0,
 			"fox_detection_radius": 105.0,
 			"flee_release_radius": 132.0,
 			# Severe hunger makes Rabbits accept more predation risk rather than flee
 			# indefinitely until they starve beside usable food.
 			"starving_threat_radius_factor": 0.48,
 			"eat_distance": 13.0,
-			"eat_rate": 4.5,
+			# Intake is spread across a visible feeding bout. Food value and daily
+			# hunger costs are unchanged; eating now occupies real simulation time.
+			"eat_rate": 1.2,
+			"feeding_site_radius": 24.0,
+			"feeding_arrival_distance": 5.0,
+			"rest_duration": 4.0,
+			"observe_duration": 1.2,
+			"hop_frequency": 2.4,
 			"food_value": 7.5,
 			"mating_radius": 82.0,
 			"reproduction_cooldown": 34.0,
@@ -225,10 +247,14 @@ static func make() -> Dictionary:
 			},
 		},
 		"inventory": {
-			"rabbit": 7,
+			"rabbit": 4,
 			"fox": 0,
-			"carrot_patch": 7,
-			"berry_bush": 5,
+			"carrot_patch": 5,
+			"berry_bush": 0,
+		},
+		"tools": {
+			"undo_seconds": 5.0,
+			"transplant_retained_biomass": 0.65,
 		},
 		"supply": {
 			"interval": 90.0,
@@ -259,7 +285,7 @@ static func make() -> Dictionary:
 			"first_collapse_bundle": {"name": "Carrot starters", "items": {"rabbit": 2, "carrot_patch": 1}},
 		},
 		"progression": {
-			"initial_unlocked": ["rabbit", "carrot_patch", "berry_bush"],
+			"initial_unlocked": ["rabbit", "carrot_patch"],
 			"initial_supply_pool": "meadow",
 			"trend_sample_interval": 1.0,
 			"trend_history_duration": 35.0,
@@ -272,15 +298,15 @@ static func make() -> Dictionary:
 				"minimum_separation": 300.0,
 				"minimum_local_food": 14.0,
 			},
-			# Five longer checkpoints replace the old ten-step ladder. With the
-			# exception of the first population target and live nursery checks, their
-			# evidence is reset on entry so a new checkpoint opens mostly unfinished.
+			# Six distinct acts introduce one new idea at a time. Live habitat state
+			# carries forward; checkpoint-local event counters are used only when the
+			# event itself is the lesson, never to make the player repeat old proofs.
 			"milestones": [
 				{
-					"id": "colony_gathers",
+					"id": "first_meal",
 					"tier": "minor",
-					"title": "A Colony Gathers",
-					"summary": "Gather 4 rabbits and help 3 of them find food.",
+					"title": "The First Meal",
+					"summary": "Welcome 4 rabbits and help 3 founders find food.",
 					"guide_intro": "This checkpoint begins with the rabbits you place. Living-animal credit can fall if a counted rabbit dies.",
 					"goal_help": {
 						"rabbit_population": {
@@ -308,35 +334,39 @@ static func make() -> Dictionary:
 							"target": 3,
 						},
 					],
-					"stabilization": 10.0,
+					"stabilization": 8.0,
 					"labels": {
 						"low": "The first rabbits are gathering...",
 						"evidence": "The founders are looking for food...",
 						"stabilizing": "The colony is settling...",
 					},
-					"guidance": "Place four rabbits with reachable food nearby. Three different rabbits must eat before the colony can settle.",
-					"teaser": "Next, the colony must raise a new generation.",
-					"completion_message": "A fed rabbit colony has gathered",
-					"effects": {"expand_world": WORLD_EXPANSION_STEP * 2.0},
+					"guidance": "Place four rabbits with reachable Carrot Patches nearby. Three different founders must eat before the colony can settle.",
+					"teaser": "Berry Bushes will bring slower, lasting forage to woodland edges.",
+					"completion_message": "The founders have eaten · Berry Bushes unlocked",
+					"effects": {
+						"expand_world": WORLD_EXPANSION_STEP * 1.5,
+						"unlock": ["berry_bush"],
+						"introduction": {"berry_bush": 2},
+					},
 				},
 				{
-					"id": "new_arrivals",
+					"id": "first_family",
 					"tier": "minor",
-					"title": "A New Generation",
-					"summary": "Raise new rabbits in more than one part of the meadow.",
-					"guide_intro": "Only events after this checkpoint opens count. Birth records stay saved here, while credit tied to a living young rabbit can fall if it dies.",
+					"title": "The First Family",
+					"summary": "Let the founders raise young, then watch one learn to forage.",
+					"guide_intro": "Only births after this checkpoint opens count. This is the one checkpoint that teaches newborn growth; later acts build on the result instead of asking for the same proof again.",
 					"goal_help": {
+						"rabbit_population": {
+							"behavior": "LIVE · CAN CHANGE",
+							"detail": "Keep at least five rabbits alive while the new generation grows.",
+						},
 						"new_rabbits": {
 							"behavior": "SAVED · THIS CHECKPOINT",
 							"detail": "Count rabbit births that happen naturally after this checkpoint begins. Placed rabbits do not count as births.",
 						},
 						"young_rabbits_fed": {
 							"behavior": "LIVING CREDIT · CAN FALL",
-							"detail": "A rabbit born during this checkpoint must grow past its newborn stage and eat. It only counts while alive.",
-						},
-						"new_birthplaces": {
-							"behavior": "SAVED · THIS CHECKPOINT",
-							"detail": "Births must happen in two genuinely different parts of the meadow. Repeated births in one family area still count as one area.",
+							"detail": "One rabbit born during this checkpoint must grow beyond its newborn stage and eat. It only counts while alive.",
 						},
 						"hold": {
 							"behavior": "TOGETHER · TIMER RESETS",
@@ -344,7 +374,7 @@ static func make() -> Dictionary:
 						},
 					},
 					"display_populations": ["rabbit"],
-					"rabbit_min": 0,
+					"rabbit_min": 5,
 					"fox_min": 0,
 					"criteria": [
 						{
@@ -352,62 +382,117 @@ static func make() -> Dictionary:
 							"type": "rabbit_birth",
 							"label": "Rabbits born this checkpoint",
 							"metric_label": "NEW RABBITS",
-							"target": 4,
+							"target": 2,
 						},
 						{
 							"id": "young_rabbits_fed",
 							"type": "born_rabbit_fed",
 							"label": "New young that grow and eat",
 							"metric_label": "YOUNG FORAGERS",
-							"target": 3,
-							"minimum_age": 8.0,
+							"target": 1,
+							"minimum_age": 6.0,
 							"fresh_only": true,
 						},
-						{
-							"id": "new_birthplaces",
-							"type": "separated_birth_zones",
-							"label": "New birth areas",
-							"metric_label": "BIRTH AREAS",
-							"target": 2,
-							"minimum_separation": 140.0,
-						},
 					],
-					"stabilization": 16.0,
+					"stabilization": 12.0,
 					"labels": {
 						"evidence": "The new generation is still taking shape...",
 						"stabilizing": "The young generation is holding...",
 					},
-					"guidance": "Only births after this checkpoint begins count. Raise four young rabbits, help three grow and eat, and establish births in two separated areas.",
-					"teaser": "Those families will need a connected network of lasting homes.",
-					"completion_message": "A new generation is thriving",
-					"effects": {"expand_world": WORLD_EXPANSION_STEP * 2.0},
+					"guidance": "Keep adult rabbits together near stocked food. Two natural births and one young forager establish the first family.",
+					"teaser": "Next, use Meadow and woodland-edge forage to establish two lasting homes.",
+					"completion_message": "The first family is thriving · Transplant unlocked",
+					"effects": {
+						"expand_world": WORLD_EXPANSION_STEP * 1.5,
+						"unlock": ["transplant"],
+						"transplant_charges": 1,
+					},
+				},
+				{
+					"id": "two_homes",
+					"tier": "minor",
+					"title": "Two Lasting Homes",
+					"summary": "Build 2 separated nurseries with productive Carrots and Berries.",
+					"guide_intro": "Nurseries and plant productivity are live conditions. The placement preview now shows habitat quality, and Transplant lets you correct one poor plant site without discarding the plant.",
+					"goal_help": {
+						"rabbit_population": {
+							"behavior": "LIVE · CAN CHANGE",
+							"detail": "Keep at least six rabbits alive so two groups of three can form.",
+						},
+						"nurseries": {
+							"behavior": "LIVE · CAN RISE OR FALL",
+							"detail": "A nursery is at least three rabbits gathered around usable nearby food. Build two groups in separate parts of the meadow; numbered cradle markers show which groups count right now.",
+						},
+						"productive_forages": {
+							"behavior": "LIVE · CAN RISE OR FALL",
+							"detail": "Keep at least one usable Carrot Patch and one usable Berry Bush in productive habitat. The placement preview labels rich, fair, and poor sites before you commit.",
+						},
+						"hold": {
+							"behavior": "TOGETHER · TIMER RESETS",
+							"detail": "Keep both nurseries and both productive forage types live together. If a group disperses or its food depletes, the hold starts over.",
+						},
+					},
+					"display_populations": ["rabbit"],
+					"rabbit_min": 6,
+					"fox_min": 0,
+					"criteria": [
+						{
+							"id": "nurseries",
+							"type": "safe_havens",
+							"label": "Stable nursery groups",
+							"metric_label": "NURSERIES",
+							"lens_label": "Nursery",
+							"target": 2,
+							"rabbits_per_group": 3,
+							"minimum_separation": 240.0,
+							"minimum_local_food": 0.0,
+						},
+						{
+							"id": "productive_forages",
+							"type": "productive_forages",
+							"label": "Productive forage types",
+							"metric_label": "FORAGE TYPES",
+							"target": 2,
+							"plant_types": ["carrot_patch", "berry_bush"],
+							"minimum_capacity_factor": 0.78,
+						},
+					],
+					"stabilization": 16.0,
+					"labels": {
+						"evidence": "The nursery network is still being built...",
+						"stabilizing": "The nursery network is holding...",
+					},
+					"guidance": "Use the habitat preview to place both food types well, then support two groups of three rabbits around separate forage sites.",
+					"teaser": "A third nursery will make the meadow resilient enough for predators.",
+					"completion_message": "Two lasting homes · Nursery starters and Transplant charge gained",
+					"effects": {
+						"expand_world": WORLD_EXPANSION_STEP * 1.5,
+						"introduction": {"rabbit": 3, "carrot_patch": 2},
+						"transplant_charges": 1,
+					},
 				},
 				{
 					"id": "nursery_network",
 					"tier": "major",
 					"title": "A Nursery Network",
-					"summary": "Create fresh families and sustain 3 separate nurseries.",
-					"guide_intro": "Nurseries are checked live and may appear or disappear as rabbits move or nearby food runs out. New-young and birth-area credit starts here.",
+					"summary": "Grow the 2 homes into a network of 3 live nurseries.",
+					"guide_intro": "Your two existing homes already count if they remain healthy. This act asks for one meaningful expansion, not another round of fresh birth records.",
 					"goal_help": {
+						"rabbit_population": {
+							"behavior": "LIVE · CAN CHANGE",
+							"detail": "Keep at least nine rabbits alive so three groups of three can form.",
+						},
 						"nurseries": {
 							"behavior": "LIVE · CAN RISE OR FALL",
-							"detail": "A nursery is at least three rabbits gathered around usable nearby food. Build three groups in separate parts of the meadow; numbered cradle markers show which groups count right now.",
-						},
-						"nursery_young_fed": {
-							"behavior": "LIVING CREDIT · CAN FALL",
-							"detail": "Three rabbits born after this checkpoint opens must grow and eat. Each only counts while it is alive.",
-						},
-						"nursery_birthplaces": {
-							"behavior": "SAVED · THIS CHECKPOINT",
-							"detail": "Have new rabbit births in three different parts of the meadow. A birthplace marker remains once that area has been recorded.",
+							"detail": "Maintain three separated groups of at least three rabbits around usable nearby food. Existing nurseries carry directly into this act.",
 						},
 						"hold": {
 							"behavior": "TOGETHER · TIMER RESETS",
-							"detail": "Keep all three live nurseries and the living young-rabbit credit complete together. If one drops, the hold starts over.",
+							"detail": "Keep all three nursery groups alive together. If a group disperses or loses usable food, the hold starts over.",
 						},
 					},
 					"display_populations": ["rabbit"],
-					"rabbit_min": 0,
+					"rabbit_min": 9,
 					"fox_min": 0,
 					"criteria": [
 						{
@@ -418,37 +503,21 @@ static func make() -> Dictionary:
 							"lens_label": "Nursery",
 							"target": 3,
 							"rabbits_per_group": 3,
-							"minimum_separation": 280.0,
-							"minimum_local_food": 0.0,
-						},
-						{
-							"id": "nursery_young_fed",
-							"type": "born_rabbit_fed",
-							"label": "New young that grow and eat",
-							"metric_label": "NURSERY YOUNG",
-							"target": 3,
-							"minimum_age": 8.0,
-							"fresh_only": true,
-						},
-						{
-							"id": "nursery_birthplaces",
-							"type": "separated_birth_zones",
-							"label": "New birth areas",
-							"metric_label": "BIRTH AREAS",
-							"target": 3,
-							"minimum_separation": 140.0,
+							"minimum_separation": 240.0,
+							"minimum_local_food": 8.0,
 						},
 					],
-					"stabilization": 20.0,
+					"stabilization": 8.0,
 					"labels": {
-						"evidence": "The nursery network is still being built...",
+						"low": "The network needs more rabbits...",
+						"evidence": "One more lasting home will complete the network...",
 						"stabilizing": "The nursery network is holding...",
 					},
-					"guidance": "A nursery has at least three rabbits around usable nearby food. After entering this checkpoint, raise and feed young in three separated parts of the meadow while all three nurseries remain alive.",
+					"guidance": "Use your nursery starters: place food at a separate site, then settle 3 rabbits together there. The rabbit preview counts nearby companions.",
 					"teaser": "Tracks have appeared. Two hunters are waiting beyond the meadow.",
-					"completion_message": "Three nurseries are thriving · Foxes have arrived",
+					"completion_message": "The nursery network is ready · Foxes have arrived",
 					"effects": {
-						"expand_world": WORLD_EXPANSION_STEP * 2.0,
+						"expand_world": WORLD_EXPANSION_STEP * 1.5,
 						"unlock": ["fox"],
 						"introduction": {"fox": 2},
 						"supply_pool": "web",
@@ -456,27 +525,31 @@ static func make() -> Dictionary:
 					},
 				},
 				{
-					"id": "predators_find_place",
+					"id": "hunt_and_recover",
 					"tier": "major",
-					"title": "Predator–Prey Rhythm",
-					"summary": "Build a fresh hunt → birth → hunt rhythm with both foxes.",
-					"guide_intro": "The ordered cycle and every counted animal start fresh here. Extra hunts or births do not break the order; only the next required event advances it.",
+					"title": "Hunt and Recover",
+					"summary": "Let both foxes feed, then rebuild the rabbit population.",
+					"guide_intro": "Hunts and births may happen in any order. The challenge is to support both predators while ending with at least as many rabbits as the act began with.",
 					"goal_help": {
-						"shared_cycle": {
-							"behavior": "TIMED ORDER · LOCKS WHEN COMPLETE",
-							"detail": "Complete these events in order: a fox hunts a rabbit → a rabbit is born → a fox hunts a rabbit. Finish within {sequence_window} of the opening hunt; once complete, this row stays complete.",
+						"hunts": {
+							"behavior": "SAVED · THIS CHECKPOINT",
+							"detail": "Count successful fox hunts during this act. Hunts can occur before or after births.",
 						},
-						"distinct_predators": {
-							"behavior": "LIVING CREDIT · CAN FALL",
-							"detail": "Two different foxes must each make a kill during this checkpoint. A fox only counts while it remains alive.",
+						"recovery_births": {
+							"behavior": "SAVED · THIS CHECKPOINT",
+							"detail": "Count natural rabbit births during this act. Births can occur before or after hunts.",
 						},
-						"recovery_young_fed": {
+						"foxes_fed": {
 							"behavior": "LIVING CREDIT · CAN FALL",
-							"detail": "After the opening hunt, one newly born rabbit must grow and eat. That rabbit only counts while alive.",
+							"detail": "Two different living foxes must each make a successful hunt during this act.",
+						},
+						"population_recovery": {
+							"behavior": "LIVE · CAN RISE OR FALL",
+							"detail": "Return the colony to at least the rabbit population present when this act opened, with an absolute minimum of ten rabbits.",
 						},
 						"hold": {
 							"behavior": "TOGETHER · TIMER RESETS",
-							"detail": "After all three goals are complete, keep the counted foxes and young rabbit alive together. If a live goal drops, the hold starts over.",
+							"detail": "Once both foxes have hunted, births have occurred, and the colony has recovered, keep those outcomes together through the hold.",
 						},
 					},
 					"display_populations": ["rabbit", "fox"],
@@ -484,70 +557,74 @@ static func make() -> Dictionary:
 					"fox_min": 0,
 					"criteria": [
 						{
-							"id": "shared_cycle",
-							"type": "ordered_cycle",
-							"label": "Three-step food-web rhythm",
-							"metric_label": "FOOD-WEB RHYTHM",
+							"id": "hunts",
+							"type": "hunts",
+							"label": "Successful hunts",
+							"metric_label": "HUNTS",
+							"target": 2,
 						},
 						{
-							"id": "distinct_predators",
+							"id": "recovery_births",
+							"type": "rabbit_birth",
+							"label": "Rabbit births",
+							"metric_label": "BIRTHS",
+							"target": 2,
+						},
+						{
+							"id": "foxes_fed",
 							"type": "distinct_foxes_fed",
 							"label": "Different foxes hunt",
 							"metric_label": "FOXES FED",
 							"target": 2,
 						},
 						{
-							"id": "recovery_young_fed",
-							"type": "born_rabbit_fed",
-							"label": "New young that grows and eats",
-							"metric_label": "RECOVERY YOUNG",
-							"target": 1,
-							"minimum_age": 6.0,
-							"fresh_only": true,
-							"after_sequence_start": true,
+							"id": "population_recovery",
+							"type": "population_recovery",
+							"label": "Rabbit population recovered",
+							"metric_label": "COLONY RECOVERY",
+							"minimum": 10,
 						},
 					],
-					"event_sequence": ["hunt", "birth", "hunt"],
-					"evidence_window": 180.0,
 					"stabilization": 22.0,
 					"labels": {
 						"evidence": "The new food-web rhythm is still forming...",
 						"stabilizing": "Both hunters and the new generation are holding...",
 					},
-					"guidance": "Everything here must happen after this checkpoint begins. Let both foxes hunt across the ordered cycle, then help its newborn rabbit grow and feed.",
-					"teaser": "One final test will ask the whole meadow to renew under pressure.",
-					"completion_message": "The predator–prey rhythm holds · the meadow opens",
+					"guidance": "Let both foxes hunt, keep forage productive, and help the rabbit colony replace its losses. The events no longer need a lucky order.",
+					"teaser": "The final act asks the whole meadow to stay productive during one living window.",
+					"completion_message": "Hunt recovery proven · Transplant charge gained",
 					"effects": {
 						"expand_world": WORLD_EXPANSION_STEP * 2.0,
 						"supply_pool": "living",
+						"transplant_charges": 1,
 					},
 				},
 				{
-					"id": "living_ecosystem",
+					"id": "living_balance",
 					"tier": "final",
-					"title": "Living Ecosystem",
-					"summary": "Keep 3 nurseries through hunt → birth → hunt → birth → hunt.",
-					"guide_intro": "The nursery count reflects the live meadow. The food-web cycle, birth areas, and young-rabbit credit all start fresh in this final checkpoint.",
+					"title": "Living Balance",
+					"summary": "Keep 2 nurseries thriving while births and hunts share one living window.",
+					"guide_intro": "The final proof measures outcomes, not event order. Build enough forage and refuge that three births and three hunts can coexist within the same recent window.",
 					"goal_help": {
 						"safe_havens": {
 							"behavior": "LIVE · CAN RISE OR FALL",
-							"detail": "A nursery is at least three rabbits gathered around enough usable nearby food. Keep three groups in separate parts of the meadow; numbered cradle markers show which groups count right now.",
+							"detail": "A nursery is at least three rabbits gathered around enough usable nearby food. Keep two separated groups thriving through predator pressure. Your third home provides a reserve when one group scatters; numbered cradle markers show the groups that count now.",
 						},
-						"living_cycle": {
-							"behavior": "TIMED ORDER · LOCKS WHEN COMPLETE",
-							"detail": "Complete these five events in order: a fox hunts a rabbit → a rabbit is born → a fox hunts → a rabbit is born → a fox hunts. Finish within {sequence_window} of the opening hunt. Extra events do not break the sequence; once all five happen, this row stays complete.",
+						"living_window": {
+							"behavior": "RECENT WINDOW · UPDATES LIVE",
+							"detail": "Within the same recent 150 seconds, record three natural births and three successful hunts while at least two foxes and twelve rabbits remain alive. Event order does not matter.",
 						},
-						"distributed_renewal": {
-							"behavior": "SAVED · THIS CHECKPOINT",
-							"detail": "After this checkpoint opens, have rabbit births in three different parts of the meadow. Recorded birth areas do not disappear.",
+						"prey_balance": {
+							"behavior": "LIVE · CAN RISE OR FALL",
+							"detail": "Keep at least five rabbits for every living fox. This protects the prey base without requiring a specific event sequence.",
 						},
-						"living_young_fed": {
-							"behavior": "LIVING CREDIT · CAN FALL",
-							"detail": "After the opening hunt, three newly born rabbits must grow and eat. Each rabbit only counts while alive.",
+						"rabbit_health": {
+							"behavior": "LIVE · CAN RISE OR FALL",
+							"detail": "Keep severe rabbit starvation below one fifth of the living colony during the final hold.",
 						},
 						"hold": {
 							"behavior": "TOGETHER · TIMER RESETS",
-							"detail": "When every row is complete, keep all live conditions true together for the final hold. The timer restarts if any live condition drops.",
+							"detail": "Keep the nurseries, recent birth-and-hunt window, prey balance, and rabbit health true together for the final hold.",
 						},
 					},
 					"display_populations": ["rabbit", "fox"],
@@ -560,44 +637,39 @@ static func make() -> Dictionary:
 							"label": "Separated nurseries",
 							"metric_label": "NURSERIES",
 							"lens_label": "Nursery",
-							"target": 3,
+							"target": 2,
 							"rabbits_per_group": 3,
-							"minimum_separation": 280.0,
-							"minimum_local_food": 14.0,
+							"minimum_separation": 240.0,
+							"minimum_local_food": 10.0,
 						},
 						{
-							"id": "living_cycle",
-							"type": "ordered_cycle",
-							"label": "Food-web cycle",
-							"metric_label": "FOOD-WEB CYCLE",
+							"id": "living_window",
+							"type": "ecology_window",
+							"label": "Living birth-and-hunt window",
+							"metric_label": "LIVING WINDOW",
+							"window": 150.0,
+							"birth_target": 3,
+							"hunt_target": 3,
+							"rabbit_minimum": 12,
+							"fox_minimum": 2,
 						},
 						{
-							"id": "distributed_renewal",
-							"type": "separated_birth_zones",
-							"label": "New birth areas",
-							"metric_label": "BIRTH AREAS",
-							"target": 3,
-							"minimum_separation": 140.0,
-						},
-						{
-							"id": "living_young_fed",
-							"type": "born_rabbit_fed",
-							"label": "New young that grow and eat",
-							"metric_label": "NEW FORAGERS",
-							"target": 3,
-							"minimum_age": 8.0,
-							"fresh_only": true,
-							"after_sequence_start": true,
+							"id": "prey_balance",
+							"type": "prey_per_fox",
+							"label": "Rabbits per fox",
+							"metric_label": "PREY BALANCE",
+							"target": 5,
 						},
 					],
-					"event_sequence": ["hunt", "birth", "hunt", "birth", "hunt"],
-					"evidence_window": 240.0,
-					"stabilization": 30.0,
+					"forbid_active_starvation": true,
+					# The 150-second ecology window already proves persistence; this short
+					# confirmation prevents a transient frame without adding another wait.
+					"stabilization": 4.0,
 					"labels": {
 						"evidence": "The living web still needs fresh renewal...",
 						"stabilizing": "The whole meadow is holding together...",
 					},
-					"guidance": "The nursery state may carry in, but the cycle, three birth areas, and three grown young all reset here. Keep the nursery network alive for the final hold.",
+					"guidance": "Keep two nurseries thriving through the hunts; the third home is your reserve. Support both foxes while births replace the losses.",
 					"teaser": "What happens next belongs to the meadow.",
 					"completion_message": "Ecosystem Established",
 					"effects": {"complete_run": true},

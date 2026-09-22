@@ -6,6 +6,13 @@ signal speed_selected(speed: float)
 signal supply_selected(index: int)
 signal restart_requested
 signal continue_requested
+signal animal_follow_requested(kind: String, entity_id: int)
+signal animal_inspected(kind: String, entity_id: int)
+signal animal_inspector_closed
+signal remove_food_requested
+signal undo_requested
+signal transplant_requested
+signal audio_toggled
 
 const Glyph = preload("res://ui/entity_glyph.gd")
 const RewardBurst = preload("res://ui/reward_burst.gd")
@@ -52,8 +59,9 @@ var last_populations := {"rabbit": -1, "fox": -1}
 var rabbit_hunger_label: Label
 var last_rabbit_hunger_state := ""
 var last_rabbit_starving_count := -1
-var rabbit_starvation_losses := 0
 var rabbit_loss_notice_time := 0.0
+var rabbit_loss_notice := ""
+var rabbit_loss_detail := ""
 
 var supply_panel: PanelContainer
 var supply_countdown: Label
@@ -69,6 +77,41 @@ var inventory_selected_marks: Dictionary = {}
 var inventory_width := 590.0
 var placement_hint: PanelContainer
 var placement_hint_label: Label
+var remove_food_button: Button
+var undo_button: Button
+var transplant_button: Button
+
+var story_panel: PanelContainer
+var story_labels: Array[Label] = []
+var family_status_label: Label
+var family_detail_label: Label
+var family_inspect_button: Button
+var last_loss_button: Button
+var journal_button: Button
+var journal_panel: PanelContainer
+var journal_entries: VBoxContainer
+var journal_note_label: Label
+var journal_open := false
+var animal_panel: PanelContainer
+var animal_glyph: Control
+var animal_name_label: Label
+var animal_status_label: Label
+var animal_activity_label: Label
+var animal_family_label: Label
+var animal_history_label: Label
+var animal_life_label: Label
+var animal_birth_label: Label
+var animal_birth_detail_label: Label
+var _inspection_birth_status: Dictionary = {}
+var _inspection_sample_time := -INF
+var _inspection_revision := -1
+var animal_follow_button: Button
+var animal_close_button: Button
+var inspected_animal_kind := ""
+var inspected_animal_id := -1
+var followed_animal_kind := ""
+var followed_animal_id := -1
+var audio_button: Button
 
 var speed_panel: PanelContainer
 var speed_buttons: Dictionary = {}
@@ -118,6 +161,9 @@ func setup(p_systems: GameSystems) -> void:
 	systems.run_failed.connect(_on_run_failed)
 	systems.run_completed.connect(_on_run_completed)
 	systems.simulation.entity_removed.connect(_on_entity_removed)
+	systems.ecology_story_added.connect(_on_ecology_story_added)
+	systems.undo_state_changed.connect(refresh)
+	systems.tool_state_changed.connect(refresh)
 	refresh()
 	_layout_interface.call_deferred()
 
@@ -131,6 +177,8 @@ func _build_interface() -> void:
 	_build_objective_card()
 	_build_population_pulse()
 	_build_supply_indicator()
+	_build_story_feed()
+	_build_animal_inspector()
 	_build_inventory_satchel()
 	_build_time_controls()
 	_build_supply_overlay()
@@ -204,6 +252,125 @@ func _build_supply_indicator() -> void:
 	restart_button.pressed.connect(_on_restart_pressed)
 	root.add_child(restart_button)
 
+	audio_button = _make_button("♪", Vector2(44.0, 44.0), "icon")
+	audio_button.tooltip_text = "Mute meadow sounds"
+	audio_button.pressed.connect(func() -> void: audio_toggled.emit())
+	root.add_child(audio_button)
+
+func _build_story_feed() -> void:
+	story_panel = _make_panel(Vector2(306.0, 0.0), "SurfaceHUDLight")
+	root.add_child(story_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", ThemeSystem.SPACE.tiny)
+	story_panel.add_child(box)
+	var eyebrow := _make_label("RABBIT FAMILIES", "eyebrow")
+	box.add_child(eyebrow)
+	var rules := _make_label("Birth needs two fed adults together and spare forage for their young.", "caption")
+	rules.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(rules)
+	family_status_label = _make_label("Place your first rabbits", "label_strong")
+	family_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(family_status_label)
+	family_detail_label = _make_label("", "caption")
+	family_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(family_detail_label)
+	family_inspect_button = _make_button("Inspect rabbit", Vector2(0.0, 32.0), "quiet")
+	family_inspect_button.pressed.connect(_inspect_family_watch)
+	box.add_child(family_inspect_button)
+	box.add_child(HSeparator.new())
+	box.add_child(_make_label("MEADOW MOMENTS", "eyebrow"))
+	for index in range(3):
+		var label := _make_label("The meadow is waking up…" if index == 0 else "", "caption")
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.max_lines_visible = 2
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		label.custom_minimum_size.y = 24.0
+		box.add_child(label)
+		story_labels.append(label)
+	last_loss_button = _make_button("Read last loss", Vector2(0.0, 36.0), "quiet")
+	last_loss_button.visible = false
+	last_loss_button.pressed.connect(_inspect_last_loss)
+	box.add_child(last_loss_button)
+	journal_button = _make_button("Life journal", Vector2(0.0, 36.0), "secondary")
+	journal_button.pressed.connect(_open_life_journal)
+	box.add_child(journal_button)
+	_build_life_journal()
+
+func _build_life_journal() -> void:
+	journal_panel = _make_panel(Vector2(306.0, 420.0), "SurfaceElevated")
+	journal_panel.visible = false
+	root.add_child(journal_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", ThemeSystem.SPACE.small)
+	journal_panel.add_child(box)
+	box.add_child(_make_label("LIFE JOURNAL", "eyebrow"))
+	journal_note_label = _make_label("Meadow time · newest first\nBirths, warnings and causes of loss", "caption")
+	box.add_child(journal_note_label)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(scroll)
+	journal_entries = VBoxContainer.new()
+	journal_entries.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	journal_entries.add_theme_constant_override("separation", ThemeSystem.SPACE.small)
+	scroll.add_child(journal_entries)
+	var close := _make_button("Back to the meadow", Vector2(0.0, 36.0), "secondary")
+	close.pressed.connect(func() -> void:
+		journal_open = false
+		_refresh_life_panels()
+	)
+	box.add_child(close)
+
+func _build_animal_inspector() -> void:
+	animal_panel = _make_panel(Vector2(306.0, 238.0), "SurfaceElevated")
+	animal_panel.visible = false
+	root.add_child(animal_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", ThemeSystem.SPACE.small)
+	animal_panel.add_child(box)
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", ThemeSystem.SPACE.small)
+	box.add_child(header)
+	animal_glyph = Glyph.new().configure("rabbit", ThemeSystem.COLOR.moss)
+	animal_glyph.custom_minimum_size = Vector2(48.0, 48.0)
+	header.add_child(animal_glyph)
+	var heading := VBoxContainer.new()
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.add_theme_constant_override("separation", 0)
+	header.add_child(heading)
+	var eyebrow := _make_label("FIELD NOTE", "eyebrow_accent")
+	heading.add_child(eyebrow)
+	animal_name_label = _make_label("Clover", "h3")
+	heading.add_child(animal_name_label)
+	animal_close_button = _make_button("×", Vector2(36.0, 36.0), "icon")
+	animal_close_button.tooltip_text = "Close field note"
+	animal_close_button.pressed.connect(_on_animal_close_pressed)
+	header.add_child(animal_close_button)
+	animal_status_label = _make_label("Adult · Comfortable", "label_success")
+	animal_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(animal_status_label)
+	animal_life_label = _make_label("", "caption")
+	animal_life_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(animal_life_label)
+	animal_activity_label = _make_label("Exploring the meadow", "body")
+	animal_activity_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(animal_activity_label)
+	animal_birth_label = _make_label("", "label_strong")
+	animal_birth_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(animal_birth_label)
+	animal_birth_detail_label = _make_label("", "caption")
+	animal_birth_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(animal_birth_detail_label)
+	animal_family_label = _make_label("Founder · no young yet", "label_secondary")
+	animal_family_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(animal_family_label)
+	animal_history_label = _make_label("Recently: Joined the meadow", "caption")
+	animal_history_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(animal_history_label)
+	animal_follow_button = _make_button("Follow", Vector2(0.0, 38.0), "secondary")
+	animal_follow_button.pressed.connect(_on_animal_follow_pressed)
+	box.add_child(animal_follow_button)
+
 func _build_inventory_satchel() -> void:
 	inventory_panel = _make_panel(Vector2(712.0, 108.0), "SurfaceHUD")
 	root.add_child(inventory_panel)
@@ -216,15 +383,29 @@ func _build_inventory_satchel() -> void:
 		card.pressed.connect(_on_inventory_pressed.bind(item))
 		box.add_child(card)
 		inventory_buttons[item] = card
-	placement_hint = _make_panel(Vector2(340.0, 42.0), "SurfaceCallout")
-	placement_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	placement_hint = _make_panel(Vector2(620.0, 46.0), "SurfaceCallout")
 	placement_hint.visible = false
 	root.add_child(placement_hint)
+	var hint_row := HBoxContainer.new()
+	hint_row.add_theme_constant_override("separation", ThemeSystem.SPACE.small)
+	placement_hint.add_child(hint_row)
 	placement_hint_label = _make_label("Placing Carrot patch  •  click the meadow", "label_strong")
-	placement_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	placement_hint_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	placement_hint_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	placement_hint.add_child(placement_hint_label)
+	placement_hint_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	hint_row.add_child(placement_hint_label)
+	undo_button = _make_button("Undo", Vector2(92.0, 34.0), "quiet")
+	undo_button.tooltip_text = "Return the last placement to your satchel"
+	undo_button.pressed.connect(func() -> void: undo_requested.emit())
+	hint_row.add_child(undo_button)
+	remove_food_button = _make_button("Remove food", Vector2(118.0, 34.0), "quiet")
+	remove_food_button.tooltip_text = "Permanently discard a food patch. No refund. Click a patch to remove it; Esc cancels."
+	remove_food_button.pressed.connect(func() -> void: remove_food_requested.emit())
+	hint_row.add_child(remove_food_button)
+	transplant_button = _make_button("Transplant", Vector2(126.0, 34.0), "secondary")
+	transplant_button.tooltip_text = "Move one existing plant to a better habitat"
+	transplant_button.pressed.connect(func() -> void: transplant_requested.emit())
+	hint_row.add_child(transplant_button)
 
 func _make_inventory_card(item: String) -> Button:
 	var button = InventoryCard.new().configure(item, ITEM_LABELS[item], ITEM_HINTS[item])
@@ -487,12 +668,23 @@ func _layout_interface() -> void:
 	population_panel.position = Vector2(population_x, 20.0) if not compact else Vector2(20.0, objective_panel.position.y + objective_panel.size.y + ThemeSystem.SPACE.medium)
 	supply_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	supply_panel.position = Vector2(viewport_size.x - 307.0, 20.0)
+	audio_button.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	audio_button.position = Vector2(viewport_size.x - 359.0, 31.0)
 	restart_button.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	restart_button.position = Vector2(viewport_size.x - 64.0, 31.0)
+	story_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	story_panel.position = Vector2(viewport_size.x - 326.0, 170.0 if viewport_size.x < 840.0 else 98.0)
+	story_panel.size = story_panel.get_combined_minimum_size()
+	animal_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	animal_panel.position = story_panel.position
+	animal_panel.size = animal_panel.get_combined_minimum_size()
+	journal_panel.position = story_panel.position
+	journal_panel.size = Vector2(306.0, maxf(260.0, minf(460.0, viewport_size.y - 202.0 - story_panel.position.y)))
+	_refresh_life_panels()
 	inventory_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	inventory_panel.position = Vector2((viewport_size.x - inventory_width) * 0.5, viewport_size.y - 128.0) if not compact else Vector2(20.0, viewport_size.y - 128.0)
 	placement_hint.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	placement_hint.position = Vector2(inventory_panel.position.x + (inventory_width - 340.0) * 0.5, inventory_panel.position.y - 50.0)
+	placement_hint.position = Vector2(clampf(inventory_panel.position.x + (inventory_width - 620.0) * 0.5, 20.0, maxf(20.0, viewport_size.x - 640.0)), inventory_panel.position.y - 54.0)
 	speed_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	speed_panel.position = Vector2(viewport_size.x - 258.0, viewport_size.y - 82.0)
 	if viewport_size.x < 840.0:
@@ -518,6 +710,9 @@ func refresh() -> void:
 	_refresh_speeds()
 	_refresh_objective()
 	_refresh_supply()
+	_refresh_story_feed()
+	_refresh_tools()
+	_refresh_animal_inspector()
 	critical_panel.visible = systems.run_director.run_state == RunDirector.STATE_CRITICAL
 
 func _refresh_population() -> void:
@@ -535,9 +730,9 @@ func _refresh_rabbit_hunger() -> void:
 	var state := str(summary["state"])
 	var starving_count := int(summary["starving_count"])
 	if rabbit_loss_notice_time > 0.0:
-		rabbit_hunger_label.text = "%d starved · add food" % rabbit_starvation_losses
+		rabbit_hunger_label.text = rabbit_loss_notice
 		rabbit_hunger_label.theme_type_variation = "LabelDanger"
-		rabbit_hunger_label.tooltip_text = "Starvation caused the population drop. Place carrot patches or berry bushes near the remaining rabbits."
+		rabbit_hunger_label.tooltip_text = rabbit_loss_detail + " Open the Life journal for the full record."
 	elif int(summary["population"]) == 0:
 		rabbit_hunger_label.text = "No rabbits yet"
 		rabbit_hunger_label.theme_type_variation = "LabelSecondary"
@@ -557,17 +752,9 @@ func _refresh_rabbit_hunger() -> void:
 		rabbit_hunger_label.theme_type_variation = "LabelSecondary"
 		rabbit_hunger_label.tooltip_text = "Hungry rabbits have found forage and are moving toward it."
 	else:
-		var forage: Dictionary = systems.simulation.ecosystem_forage_budget()
-		var supported := int(floor(float(forage["sustainable_rabbits"])))
-		var births_paused := int(summary["population"]) >= supported or float(forage["stock_ratio"]) < float(systems.config["rabbit"]["reproduction_min_stock_ratio"])
-		if births_paused:
-			rabbit_hunger_label.text = "Forage full · births paused"
-			rabbit_hunger_label.theme_type_variation = "LabelSecondary"
-			rabbit_hunger_label.tooltip_text = "The renewable forage is supporting its current limit. Add a well-placed carrot patch or berry bush to make room for young."
-		else:
-			rabbit_hunger_label.text = "Well fed · room for young"
-			rabbit_hunger_label.theme_type_variation = "LabelSuccess"
-			rabbit_hunger_label.tooltip_text = "Local food is stocked and renewable forage can support more rabbits."
+		rabbit_hunger_label.text = "Well fed"
+		rabbit_hunger_label.theme_type_variation = "LabelSuccess"
+		rabbit_hunger_label.tooltip_text = "No rabbits are in hunger distress. Birth also needs meals stored as energy, a ready companion, and spare forage. Inspect a rabbit to see its current needs."
 	var previous_rank := _hunger_state_rank(last_rabbit_hunger_state)
 	var current_rank := _hunger_state_rank(state)
 	if not last_rabbit_hunger_state.is_empty() and (current_rank > previous_rank or starving_count > last_rabbit_starving_count):
@@ -601,9 +788,206 @@ func _refresh_inventory() -> void:
 		inventory_panel.custom_minimum_size.x = inventory_width
 		inventory_panel.size.x = inventory_width
 		_layout_interface.call_deferred()
-	placement_hint.visible = not selected_item.is_empty() and not systems.supply_pending
-	if not selected_item.is_empty():
-		placement_hint_label.text = "Placing %s  •  click the meadow" % ITEM_LABELS[selected_item]
+	if not selected_item.is_empty() and not systems.transplant_mode:
+		placement_hint_label.text = "Placing %s  •  move over the meadow" % ITEM_LABELS[selected_item]
+
+func _refresh_tools() -> void:
+	var removal_available := not systems.simulation.plants.is_empty() and not systems.is_game_over() and not systems.is_completed()
+	remove_food_button.visible = removal_available or systems.remove_food_mode
+	remove_food_button.disabled = systems.supply_pending
+	remove_food_button.text = "Cancel" if systems.remove_food_mode else "Remove food"
+	var undo_available := systems.can_undo_last_placement()
+	var transplant_unlocked := systems.run_director.is_unlocked("transplant")
+	undo_button.visible = undo_available and not systems.remove_food_mode
+	if undo_available:
+		var seconds := maxi(1, ceili(float(systems.last_placement.get("expires_at", 0.0)) - systems.real_time))
+		undo_button.text = "Undo %ds" % seconds
+	transplant_button.visible = transplant_unlocked and not systems.remove_food_mode
+	transplant_button.disabled = systems.supply_pending or (systems.transplant_charges <= 0 and not systems.transplant_mode)
+	transplant_button.text = "Cancel" if systems.transplant_mode else "Transplant ×%d" % systems.transplant_charges
+	if systems.remove_food_mode:
+		placement_hint_label.text = "Click food to remove · no refund"
+	elif systems.transplant_mode:
+		if systems.transplant_source_id == -1:
+			placement_hint_label.text = "Transplant · choose an existing plant"
+		else:
+			var plant: Dictionary = systems.simulation.plants.get(systems.transplant_source_id, {})
+			placement_hint_label.text = "Move %s · choose its new habitat" % ITEM_LABELS.get(str(plant.get("type", "carrot_patch")), "plant")
+	elif systems.selected_item.is_empty() and (undo_available or transplant_unlocked or removal_available):
+		placement_hint_label.text = "Click an animal for its story"
+	placement_hint.visible = not systems.supply_pending and (not systems.selected_item.is_empty() or undo_available or transplant_unlocked or systems.transplant_mode or removal_available or systems.remove_food_mode)
+
+func _refresh_story_feed() -> void:
+	var watched := systems.family_watch()
+	family_inspect_button.visible = not watched.is_empty()
+	if watched.is_empty():
+		family_status_label.text = "Place your first rabbits"
+		family_detail_label.text = "Keep companions close to fresh food. Click any rabbit to see its needs."
+	else:
+		family_status_label.text = "%s · %s" % [watched["name"], watched["summary"]]
+		family_detail_label.text = str(watched["detail"])
+		family_inspect_button.text = "Inspect %s" % watched["name"]
+	last_loss_button.visible = not systems.latest_loss.is_empty()
+	if last_loss_button.visible:
+		last_loss_button.text = "Last loss: %s · read why" % systems.latest_loss["name"]
+		last_loss_button.tooltip_text = str(systems.latest_loss["description"])
+	for index in range(story_labels.size()):
+		var label: Label = story_labels[index]
+		if index < systems.ecology_stories.size():
+			var story: Dictionary = systems.ecology_stories[index]
+			label.text = "%s · %s" % [_journal_time(float(story["time"])), str(story["description"])]
+			label.tooltip_text = "%s\n%s" % [story["description"], story.get("detail", "")]
+			label.theme_type_variation = "CaptionAccent" if index == 0 else "Caption"
+		else:
+			label.text = "The meadow is waking up…" if index == 0 else ""
+	_refresh_life_panels()
+
+func _refresh_life_panels() -> void:
+	for index in range(story_labels.size()):
+		story_labels[index].visible = root.size.x >= 840.0 or index < 2
+	story_panel.visible = inspected_animal_id == -1 and not journal_open
+	journal_panel.visible = journal_open
+	animal_panel.visible = inspected_animal_id != -1 and not journal_open
+	story_panel.size = story_panel.get_combined_minimum_size()
+	animal_panel.size = animal_panel.get_combined_minimum_size()
+
+func _inspect_family_watch() -> void:
+	var watched := systems.family_watch()
+	if not watched.is_empty(): show_animal("rabbit", int(watched["id"]))
+
+func _inspect_last_loss() -> void:
+	if not systems.latest_loss.is_empty():
+		show_animal(str(systems.latest_loss["kind"]), int(systems.latest_loss["id"]))
+
+func _journal_time(time: float) -> String:
+	return "%d:%02d" % [floori(time / 60.0), floori(time) % 60]
+
+func _open_life_journal() -> void:
+	journal_open = true
+	journal_note_label.text = "Meadow time · through %s\nBirths, warnings and causes of loss" % _journal_time(systems.simulation.simulation_time)
+	_rebuild_life_journal()
+	_refresh_life_panels()
+
+func _rebuild_life_journal() -> void:
+	_clear_children(journal_entries)
+	if systems.ecology_stories.is_empty():
+		journal_entries.add_child(_make_label("Your meadow's story begins here.", "caption"))
+	for story in systems.ecology_stories:
+		var label := _make_label("%s · %s" % [_journal_time(float(story["time"])), story["description"]], "label_strong")
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		journal_entries.add_child(label)
+		if not str(story.get("detail", "")).is_empty():
+			var detail := _make_label(str(story["detail"]), "caption")
+			detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			journal_entries.add_child(detail)
+		var kind := str(story["kind"])
+		var id := int(story["entity_id"])
+		var living: bool = (systems.simulation.rabbits if kind == "rabbit" else systems.simulation.foxes).has(id)
+		if living or not systems.simulation.death_snapshot(kind, id).is_empty():
+			var inspect := _make_button("Read field note", Vector2(0.0, 30.0), "quiet")
+			inspect.pressed.connect(show_animal.bind(kind, id))
+			journal_entries.add_child(inspect)
+		journal_entries.add_child(HSeparator.new())
+
+func _refresh_animal_inspector() -> void:
+	if inspected_animal_id == -1:
+		animal_panel.visible = false
+		return
+	var snapshot := systems.simulation.animal_snapshot(inspected_animal_kind, inspected_animal_id, false)
+	if snapshot.is_empty():
+		snapshot = systems.simulation.death_snapshot(inspected_animal_kind, inspected_animal_id)
+		if snapshot.is_empty():
+			hide_animal()
+			return
+		_show_memorial(snapshot)
+		return
+	animal_panel.visible = not journal_open
+	animal_follow_button.visible = true
+	animal_name_label.text = str(snapshot["name"])
+	animal_glyph.configure(inspected_animal_kind, ThemeSystem.COLOR.moss if inspected_animal_kind == "rabbit" else ThemeSystem.COLOR.accent)
+	var hunger_state := str(snapshot["hunger_state"])
+	animal_status_label.text = "%s · %s" % [snapshot["stage"], hunger_state]
+	animal_status_label.theme_type_variation = "LabelDanger" if hunger_state == "Starving" else ("LabelWarning" if hunger_state in ["Needs food", "Looking for food"] else "LabelSuccess")
+	animal_life_label.text = "Age %s · meadow time" % _journal_time(float(snapshot["age"]))
+	if str(snapshot["stage"]) == "Elder":
+		animal_life_label.text += "\nClock badge: nearing the end of a natural life. Food cannot stop aging."
+		animal_life_label.theme_type_variation = "LabelWarning"
+	else:
+		animal_life_label.theme_type_variation = "Caption"
+	if hunger_state == "Starving":
+		animal_life_label.text += "\nAt risk of death without food. Bring fresh forage close." if inspected_animal_kind == "rabbit" else "\nAt risk of death without a successful hunt."
+	animal_activity_label.text = str(snapshot["activity"])
+	animal_birth_label.visible = inspected_animal_kind == "rabbit"
+	animal_birth_detail_label.visible = inspected_animal_kind == "rabbit"
+	if inspected_animal_kind == "rabbit":
+		if systems.simulation.simulation_time - _inspection_sample_time >= 0.5 or _inspection_revision != systems.life_revision:
+			_inspection_birth_status = systems.simulation.rabbit_birth_status(inspected_animal_id)
+			_inspection_sample_time = systems.simulation.simulation_time
+			_inspection_revision = systems.life_revision
+		animal_birth_label.text = "Family · %s" % _inspection_birth_status.get("summary", "Checking needs")
+		animal_birth_detail_label.text = str(_inspection_birth_status.get("detail", ""))
+	var parent_names: Array = snapshot["parent_names"]
+	var family := "Founder" if parent_names.is_empty() else "Young of %s" % " & ".join(parent_names)
+	var offspring_count := int(snapshot["offspring_count"])
+	if offspring_count > 0:
+		family += " · %d %s" % [offspring_count, "young" if offspring_count == 1 else "young"]
+	animal_family_label.text = family
+	var life_count := int(snapshot["hunts"]) if inspected_animal_kind == "fox" else int(snapshot["meals"])
+	var life_word := "hunts" if inspected_animal_kind == "fox" else "feeding visits"
+	animal_history_label.text = "Recently: %s · %d %s" % [snapshot["recent_event"], life_count, life_word]
+	var following := followed_animal_kind == inspected_animal_kind and followed_animal_id == inspected_animal_id
+	animal_follow_button.text = "Stop following" if following else "Follow %s" % str(snapshot["name"])
+	animal_panel.size = animal_panel.get_combined_minimum_size()
+
+func _show_memorial(snapshot: Dictionary) -> void:
+	animal_panel.visible = not journal_open
+	animal_name_label.text = str(snapshot["name"])
+	animal_glyph.configure(str(snapshot["kind"]), ThemeSystem.COLOR.moss if snapshot["kind"] == "rabbit" else ThemeSystem.COLOR.accent)
+	var cause := str(snapshot["cause"])
+	animal_status_label.text = {"age": "Died of old age", "starvation": "Died from starvation", "predation": "Caught by a fox"}.get(cause, "Died")
+	animal_status_label.theme_type_variation = "LabelDanger"
+	animal_life_label.text = "At %s · age %s in meadow time" % [_journal_time(float(snapshot["time"])), _journal_time(float(snapshot["age"]))]
+	animal_life_label.theme_type_variation = "Caption"
+	animal_activity_label.text = systems.death_explanation(cause, str(snapshot["kind"]))
+	animal_birth_label.visible = false
+	animal_birth_detail_label.visible = false
+	animal_family_label.text = "%d young · %d feeding visits" % [int(snapshot.get("offspring_count", 0)), int(snapshot.get("meals", 0))] if snapshot["kind"] == "rabbit" else "%d young · %d hunts" % [int(snapshot.get("offspring_count", 0)), int(snapshot.get("hunts", 0))]
+	animal_history_label.text = "This loss is recorded in the Life journal."
+	animal_follow_button.visible = false
+	animal_panel.size = animal_panel.get_combined_minimum_size()
+
+func show_animal(kind: String, entity_id: int) -> void:
+	journal_open = false
+	if kind != inspected_animal_kind or entity_id != inspected_animal_id:
+		_inspection_sample_time = -INF
+	inspected_animal_kind = kind
+	inspected_animal_id = entity_id
+	_refresh_animal_inspector()
+	_refresh_life_panels()
+	animal_inspected.emit(kind, entity_id)
+
+func hide_animal() -> void:
+	inspected_animal_kind = ""
+	inspected_animal_id = -1
+	animal_panel.visible = false
+	_refresh_life_panels()
+	animal_inspector_closed.emit()
+
+func set_followed_animal(kind: String, entity_id: int) -> void:
+	followed_animal_kind = kind
+	followed_animal_id = entity_id
+	_refresh_animal_inspector()
+
+func set_audio_enabled(enabled: bool) -> void:
+	audio_button.text = "♪" if enabled else "×"
+	audio_button.tooltip_text = "Mute meadow sounds" if enabled else "Turn meadow sounds on"
+
+func set_placement_guidance(assessment: Dictionary) -> void:
+	if assessment.is_empty() or systems.supply_pending:
+		return
+	var guidance := "%s · %s" % [str(assessment.get("title", "Choose a site")), str(assessment.get("detail", ""))]
+	placement_hint_label.text = guidance
+	placement_hint_label.tooltip_text = guidance
 
 func _refresh_speeds() -> void:
 	for speed in speed_buttons:
@@ -623,13 +1007,14 @@ func _refresh_objective() -> void:
 		objective_eyebrow.text = "FIELD NOTES COMPLETE"
 		objective_title.text = "A living ecosystem"
 		objective_body.text = "The habitat continues at its own rhythm."
-		objective_progress_view.set_goals([{
+		var observation_goals: Array[Dictionary] = [{
 			"id": "observation",
 			"label": "Observe the living ecosystem",
 			"value": "Ongoing",
 			"kind": "leaf",
 			"state": "success",
-		}])
+		}]
+		objective_progress_view.set_goals(observation_goals)
 		objective_progress_view.set_hold_progress(1.0, "success", false)
 		objective_progress_view.set_guidance("")
 		objective_progress_view.set_next("Follow the patterns that interest you.", "Place, watch, and learn from the ecosystem without another checkpoint to complete.")
@@ -675,6 +1060,10 @@ func _refresh_objective() -> void:
 		var hold_state := "success" if hold_ratio >= 1.0 else ("warning" if bool(progress["hold_active"]) else _checkpoint_semantic_state(state, phase))
 		objective_progress_view.set_hold_progress(hold_ratio, hold_state, true)
 	objective_progress_view.set_next(str(coach["title"]), str(coach["detail"]))
+	# The family panel carries the full explanation beside this compact view;
+	# retain it as the next-step tooltip without pushing population into tools.
+	if root.size.x < 1030.0 and objective_id == "first_family":
+		objective_progress_view.next_detail_label.visible = false
 	_update_objective_layout("goals:%s:%s" % [str(objective["id"]), phase])
 
 func _checkpoint_goals(_objective: Dictionary, progress: Dictionary) -> Array[Dictionary]:
@@ -690,7 +1079,9 @@ func _checkpoint_goals(_objective: Dictionary, progress: Dictionary) -> Array[Di
 		var title := _player_goal_label(goal)
 		var value := "%d/%d %s" % [int(goal.get("current", 0)), int(goal.get("target", 1)), _goal_unit(goal_type)]
 		var state := "success" if met else str(goal.get("unmet_state", "warning"))
-		if goal_type == "health":
+		if goal_type == "ecology_window":
+			value = "B %d/%d · H %d/%d" % [int(goal.get("births", 0)), int(goal.get("birth_target", 0)), int(goal.get("hunts", 0)), int(goal.get("hunt_target", 0))]
+		elif goal_type == "health":
 			var health_status := str(goal.get("status", "fed"))
 			value = {
 				"fed": "Fed",
@@ -786,6 +1177,8 @@ func _goal_unit(goal_type: String) -> String:
 		"prey_per_fox": "rabbits/fox",
 		"rabbit_population": "rabbits",
 		"fox_population": "foxes",
+		"productive_forages": "types",
+		"population_recovery": "rabbits",
 	}.get(goal_type, "goals")
 
 func _format_hold_value(elapsed: float, target: float) -> String:
@@ -812,6 +1205,12 @@ func _player_goal_label(goal: Dictionary) -> String:
 			return "Foxes with a kill"
 		"prey_per_fox":
 			return "Rabbits per fox"
+		"productive_forages":
+			return "Productive forage"
+		"population_recovery":
+			return "Colony recovered"
+		"ecology_window":
+			return "Births + hunts together"
 		"health":
 			return "Rabbit hunger" if str(goal.get("kind", "")) == "rabbit" else "Fox hunger"
 		"trend":
@@ -880,6 +1279,11 @@ func _checkpoint_semantic_state(run_state: String, phase: String) -> String:
 
 func _checkpoint_action(default_action: Dictionary, progress: Dictionary) -> Dictionary:
 	var missing_rabbits := maxi(0, int(progress["rabbit_target"]) - int(progress["rabbit_count"]))
+	# This checkpoint grows the colony through births. A generic population
+	# deficit must not tell a player with an empty satchel to place more rabbits.
+	if str(progress.get("milestone_id", "")) == "first_family" and int(progress["rabbit_count"]) >= 2:
+		if int(progress["birth_count"]) < int(progress["birth_target"]) or missing_rabbits > 0:
+			return _family_checkpoint_action(default_action)
 	if missing_rabbits > 0:
 		return {
 			"title": "Bring %d more %s to the meadow." % [missing_rabbits, "rabbit" if missing_rabbits == 1 else "rabbits"],
@@ -914,14 +1318,30 @@ func _checkpoint_action(default_action: Dictionary, progress: Dictionary) -> Dic
 				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
 				return {"title": "Help %d more young %s grow and eat." % [missing, "rabbit" if missing == 1 else "rabbits"], "detail": "Keep their group near food while the young rabbits grow.", "kind": "rabbit"}
 			"rabbit_birth":
-				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
-				return {"title": "Wait for %d more rabbit %s." % [missing, "birth" if missing == 1 else "births"], "detail": "Keep adult rabbits together near food.", "kind": "rabbit"}
+				return _family_checkpoint_action(default_action)
 			"distinct_foxes_fed":
 				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
 				return {"title": "Let %d more %s kill a rabbit." % [missing, "fox" if missing == 1 else "foxes"], "detail": "Keep enough rabbits spread through the meadow for both the foxes and the colony.", "kind": "fox"}
 			"prey_per_fox":
 				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
 				return {"title": "Raise rabbits per fox by %d." % missing, "detail": "Add food or pause before adding another fox.", "kind": "rabbit"}
+			"productive_forages":
+				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
+				return {"title": "Establish %d more productive forage %s." % [missing, "type" if missing == 1 else "types"], "detail": "Use the placement quality label: Carrots favor open Meadow, while Berries favor woodland and Thicket margins.", "kind": "leaf"}
+			"population_recovery":
+				var missing := maxi(0, int(criterion.get("target", 1)) - int(criterion.get("current", 0)))
+				return {"title": "Recover %d more %s." % [missing, "rabbit" if missing == 1 else "rabbits"], "detail": "Support births with stocked, reachable forage; the target is the population from the start of this act.", "kind": "rabbit"}
+			"ecology_window":
+				var birth_missing := maxi(0, int(criterion.get("birth_target", 0)) - int(criterion.get("births", 0)))
+				var hunt_missing := maxi(0, int(criterion.get("hunt_target", 0)) - int(criterion.get("hunts", 0)))
+				if int(criterion.get("rabbit_count", 0)) < int(criterion.get("rabbit_target", 0)):
+					return {"title": "Rebuild the rabbit reserve.", "detail": "The living window needs at least %d rabbits before it can hold." % int(criterion.get("rabbit_target", 0)), "kind": "rabbit"}
+				if int(criterion.get("fox_count", 0)) < int(criterion.get("fox_target", 0)):
+					return {"title": "Restore two living foxes.", "detail": "Choose a fox supply only after the rabbit reserve is healthy.", "kind": "fox"}
+				if birth_missing > 0:
+					return {"title": "Support %d more recent rabbit %s." % [birth_missing, "birth" if birth_missing == 1 else "births"], "detail": "Keep adults near stocked forage; hunts may happen before or after births.", "kind": "rabbit"}
+				if hunt_missing > 0:
+					return {"title": "Support %d more recent fox %s." % [hunt_missing, "hunt" if hunt_missing == 1 else "hunts"], "detail": "Keep enough exposed prey for both foxes without weakening every nursery.", "kind": "fox"}
 			"ordered_cycle":
 				break
 	var sequence: Array = progress["sequence"]
@@ -938,6 +1358,19 @@ func _checkpoint_action(default_action: Dictionary, progress: Dictionary) -> Dic
 		}
 	return default_action
 
+func _family_checkpoint_action(fallback: Dictionary) -> Dictionary:
+	var watched := systems.family_watch()
+	if watched.is_empty(): return fallback
+	var code := str(watched["code"])
+	var detail := str(watched["detail"])
+	if code in ["local_capacity", "world_capacity"]:
+		detail = "Add productive forage near this home. Use the placement quality preview; waiting alone will not make room for young."
+	elif code == "needs_meals":
+		detail = "Keep forage near this rabbit. Repeated meals build the food reserves needed for young."
+	elif code == "mate_not_ready":
+		detail = "This rabbit is ready; a nearby adult still needs food or rest. Inspect the companion to see what is missing."
+	return {"title": "%s · %s" % [watched["name"], watched["summary"]], "detail": detail, "kind": "carrot_patch" if code in ["local_capacity", "world_capacity", "local_food", "local_stock", "world_stock"] else "rabbit"}
+
 func _qualitative_objective_coach(objective_id: String, phase: String, run_state: String) -> Dictionary:
 	if run_state == RunDirector.STATE_CRITICAL:
 		return {"title": "Save the rabbit colony.", "detail": "Bring food to the remaining rabbits and give them time to recover.", "kind": "rabbit"}
@@ -950,16 +1383,18 @@ func _qualitative_objective_coach(objective_id: String, phase: String, run_state
 	if phase == "stabilizing":
 		return {"title": "Let the pattern settle.", "detail": "The meadow is finding its balance; keep changes gentle.", "kind": "leaf"}
 	match objective_id:
-		"colony_gathers":
+		"first_meal":
 			return {"title": "Start the colony.", "detail": "Place four rabbits near food and help three different founders eat.", "kind": "rabbit"}
-		"new_arrivals":
-			return {"title": "Raise a new generation.", "detail": "New births, young foragers, and new birth areas all start counting now.", "kind": "rabbit"}
+		"first_family":
+			return {"title": "Raise the first family.", "detail": "Support two natural births and help one young rabbit grow and eat.", "kind": "rabbit"}
+		"two_homes":
+			return {"title": "Build two lasting homes.", "detail": "Use productive Carrots and Berries to support two separated rabbit groups.", "kind": "rabbit"}
 		"nursery_network":
-			return {"title": "Build three lasting nurseries.", "detail": "Create fresh families in three separated, well-fed parts of the meadow.", "kind": "rabbit"}
-		"predators_find_place":
-			return {"title": "Begin a fresh food-web cycle.", "detail": "Both foxes must hunt around a new birth, then that young rabbit must grow and eat.", "kind": "fox"}
-		"living_ecosystem":
-			return {"title": "Renew the whole meadow.", "detail": "Complete hunt → birth → hunt → birth → hunt, raise young in three birth areas, and keep every nursery live.", "kind": "leaf"}
+			return {"title": "Complete the nursery network.", "detail": "Keep the first two homes and establish one more separated nursery.", "kind": "rabbit"}
+		"hunt_and_recover":
+			return {"title": "Feed both foxes and recover.", "detail": "Hunts and births can happen in any order; restore the opening rabbit population.", "kind": "fox"}
+		"living_balance":
+			return {"title": "Hold a living balance.", "detail": "Keep births, hunts, nurseries, prey reserve, and forage health true in the same recent window.", "kind": "leaf"}
 	return {"title": "Watch the ecosystem.", "detail": "Respond to what the living meadow needs.", "kind": "leaf"}
 
 func _format_short_time(seconds: float) -> String:
@@ -1000,8 +1435,6 @@ func process_visual(delta: float) -> void:
 			toast_panel.visible = false
 	if rabbit_loss_notice_time > 0.0:
 		rabbit_loss_notice_time = maxf(0.0, rabbit_loss_notice_time - delta)
-		if is_zero_approx(rabbit_loss_notice_time):
-			rabbit_starvation_losses = 0
 	refresh()
 	_fit_objective_panel_to_content()
 
@@ -1217,9 +1650,9 @@ func _on_supply_claimed(bundle: Dictionary) -> void:
 func _on_milestone_completed(_index: int, milestone_id: String, message: String) -> void:
 	var milestone := systems.run_director.milestone_by_id(milestone_id)
 	var tier := str(milestone.get("tier", "minor"))
+	_pulse_control(objective_panel, true)
 	if tier == "major":
 		show_toast("MEADOW MILESTONE · %s" % message, 4.2, true)
-		_pulse_control(objective_panel, true)
 	elif tier == "final":
 		show_toast(message, 3.3, true)
 	else:
@@ -1233,14 +1666,30 @@ func _on_critical_recovered() -> void:
 	critical_panel.visible = false
 	show_toast("The colony is finding its feet", 2.8)
 
-func _on_entity_removed(kind: String, _entity_id: int, _position: Vector2, cause: String) -> void:
-	if kind != "rabbit" or cause != "starvation":
+func _on_entity_removed(kind: String, entity_id: int, _position: Vector2, cause: String) -> void:
+	if kind == inspected_animal_kind and entity_id == inspected_animal_id:
+		_refresh_animal_inspector()
+	if kind == followed_animal_kind and entity_id == followed_animal_id:
+		set_followed_animal("", -1)
+	if kind != "rabbit" or cause not in ["starvation", "age", "predation"]:
 		return
-	if rabbit_loss_notice_time <= 0.0:
-		rabbit_starvation_losses = 0
-	rabbit_starvation_losses += 1
-	rabbit_loss_notice_time = 5.0
+	rabbit_loss_notice = "−1 · %s" % {"starvation": "starvation", "age": "old age", "predation": "fox hunt"}[cause]
+	rabbit_loss_detail = str(systems.latest_loss.get("description", "Rabbit lost")) + ". " + systems.death_explanation(cause)
+	rabbit_loss_notice_time = 8.0
 	_pulse_control(rabbit_hunger_label, false)
+
+func _on_ecology_story_added(_story: Dictionary) -> void:
+	_refresh_story_feed()
+	_refresh_animal_inspector()
+	# Keep the open journal stable while the reader scrolls or focuses a button.
+	# Reopening takes a fresh snapshot of the recent history.
+
+func _on_animal_close_pressed() -> void:
+	hide_animal()
+
+func _on_animal_follow_pressed() -> void:
+	if inspected_animal_id != -1:
+		animal_follow_requested.emit(inspected_animal_kind, inspected_animal_id)
 
 func _on_run_failed(recap: String) -> void:
 	critical_panel.visible = false

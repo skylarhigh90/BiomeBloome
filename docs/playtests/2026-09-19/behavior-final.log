@@ -1,0 +1,72 @@
+ERROR: Failed to open 'user://logs/godot2026-09-19T01.02.43.log'.
+   at: copy (core/io/dir_access.cpp:429)
+ERROR: Failed to open log file for writing: user://logs/godot.log
+   at: rotate_file (core/io/logger.cpp:169)
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+ERROR: Condition "ret != noErr" is true. Returning: ""
+   at: get_system_ca_certificates (platform/macos/os_macos.mm:1035)
+PASS: removal requires explicit tool selection
+PASS: food removal available while paused without an unlock
+PASS: food removal cannot remove animals
+PASS: supply modal blocks food removal
+PASS: food tool discards a placed patch
+PASS: discarded food cannot be refunded through inventory or undo
+PASS: removal exits after one patch
+PASS: discarding frees the location for replacement food
+PASS: cancel prevents removal
+PASS: inventory selection exits removal mode
+PASS: berry bushes are discarded without refund
+PASS: successful placement consumes exactly one
+PASS: invalid placement consumes nothing
+PASS: population counters reflect living entities
+PASS: rabbits seek nearby food
+PASS: placing a Rabbit beside reachable forage establishes its home immediately
+PASS: social vision shares food transitively while route choice remains individual
+PASS: rabbits finish a meal and settle near their new home
+PASS: a shared home keeps three Rabbits together through a nursery hold
+PASS: ready adults gather at their shared home
+PASS: adults outside mating range gather and produce young at their shared home
+PASS: prolonged hungry commuting lets a Rabbit establish a new home
+PASS: newborn Rabbits inherit their parent's home
+PASS: food remains outside an isolated rabbit's local vision
+PASS: unserved Rabbits widen their food search after trying locally
+PASS: rabbits flee nearby foxes
+PASS: Rabbit flee stamina is finite and recovers after danger passes
+PASS: foxes target nearby rabbits
+PASS: Foxes split across prey instead of duplicating the same hunt
+PASS: Foxes spend finite sprint stamina during an active hunt
+PASS: a failed hunt teaches only the Fox that attempted it
+PASS: successful hunt removes the exact prey entity
+PASS: plants lose food when eaten
+PASS: plant food regenerates
+PASS: depleted Carrots remain unavailable through a visible recovery window
+PASS: Rabbits reject depletion-latched food and choose a usable alternative
+PASS: reachable food choice is led by route distance
+PASS: carrot patches remain the fast-growing, low-capacity food
+PASS: rabbit reproduction creates an entity and spends real ecological resources
+PASS: Rabbit births pause when local renewable forage cannot carry another animal
+PASS: rabbit reproduction is limited by cooldown and conditions
+PASS: fox reproduction creates an actual entity
+PASS: fox reproduction is limited by feeding and cooldown conditions
+PASS: hunger summary separates rabbits finding food from rabbits that need help
+PASS: starvation can kill rabbits and foxes
+PASS: a rescued animal sheds starvation debt as soon as it eats
+PASS: simulation pause stops simulation time
+PASS: 2× and 3× advance simulation proportionally
+PASS: milestone stability starts immediately and resets
+PASS: milestone completion preserves the world
+PASS: supply choices add configured inventory
+PASS: supply arrival freezes the meadow before announcing choices, blocks play, and restores the exact prior speed
+PASS: milestone expansion increases playable area
+PASS: fixed seeded behavior is reproducible
+PASS: rabbit individuality is diverse and seed-reproducible
+PASS: co-located rabbits develop separate trajectories
+PASS: similar food targets attract different rabbits
+PASS: spatial lookup remains practical at 150 rabbits and 30 foxes
+
+58 behavior tests passed; 0 failed.
+WARNING: 15 ObjectDB instances were leaked at exit (run with `--verbose` for details).
+   at: cleanup (core/object/object.cpp:2536)
+ERROR: 6 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:822)

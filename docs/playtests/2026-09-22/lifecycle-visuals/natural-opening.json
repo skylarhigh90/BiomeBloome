@@ -1,0 +1,80 @@
+{
+  "action": {
+    "action": "Place one productive forage plant near the blocked rabbit's home",
+    "assessment": {
+      "detail": "Woodland and Thicket margins give Berries their best recovery. This site supports 128% of standard capacity.",
+      "quality": "rich",
+      "score": 1.27751394742778,
+      "title": "Rich habitat",
+      "valid": true
+    },
+    "inventory_after": 1,
+    "inventory_before": 2,
+    "item": "berry_bush",
+    "plant_id": 10,
+    "position": "(-30.0, 125.0)",
+    "time": 30.0,
+    "trigger": {
+      "code": "local_capacity",
+      "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+      "ready": false,
+      "summary": "More nearby forage needed"
+    }
+  },
+  "after_time": 31.0,
+  "before_status": {
+    "code": "local_capacity",
+    "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+    "ready": false,
+    "summary": "More nearby forage needed"
+  },
+  "before_time": 30.0,
+  "failures": [],
+  "first_birth_time": 30.9,
+  "method": "Actual GameHUD and WorldView on default GameSystems seed240821; ordinary initial inventory placements. At30s, place one earned berry bush using the same helper as the hint-response telemetry.",
+  "newborn_snapshot": {
+    "activity": "Finding a resting spot",
+    "age": 0.1,
+    "age_ratio": 0.000385605965353439,
+    "alive": true,
+    "behavior": "shift",
+    "birth_status": {
+      "code": "young",
+      "detail": "Can become a parent in about 12 meadow seconds, once fed and near another ready adult.",
+      "ready": false,
+      "summary": "Still growing"
+    },
+    "home_position": "(-30.0, 25.0)",
+    "hunger_ratio": 0.224647112626296,
+    "hunger_state": "Comfortable",
+    "hunts": 0,
+    "id": 11,
+    "kind": "rabbit",
+    "lifespan": 259.332087635994,
+    "meals": 0,
+    "name": "Juniper",
+    "offspring_count": 0,
+    "parent_names": [
+      "Fern",
+      "Sorrel"
+    ],
+    "position": "(-44.3966, 16.47178)",
+    "recent_event": "Born in the meadow",
+    "stage": "Young",
+    "starvation_time": 0.0
+  },
+  "ui_bounds": {
+    "08-natural-opening-blocked": {
+      "inspector": "[P: (954.0, 98.0), S: (306.0, 395.0)]",
+      "inventory_hint": "[P: (330.0, 618.0), S: (620.0, 60.0)]",
+      "objective": "[P: (20.0, 20.0), S: (360.0, 527.0)]",
+      "population": "[P: (435.0, 20.0), S: (410.0, 66.0)]"
+    },
+    "09-natural-opening-after-hint": {
+      "inspector": "[P: (954.0, 98.0), S: (306.0, 374.0)]",
+      "inventory_hint": "[P: (330.0, 618.0), S: (620.0, 60.0)]",
+      "objective": "[P: (20.0, 20.0), S: (360.0, 475.0)]",
+      "population": "[P: (435.0, 20.0), S: (410.0, 66.0)]"
+    }
+  }
+}

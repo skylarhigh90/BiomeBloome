@@ -1,0 +1,13 @@
+{
+  "frames": 135,
+  "unique_hashes": 135,
+  "first_t": 0.2,
+  "last_t": 119.299999999997,
+  "rendered_full_run": {
+    "completed": true,
+    "foxes": 2,
+    "rabbits": 19,
+    "sandbox_verified": true,
+    "simulation_time": 367.200000000015
+  }
+}

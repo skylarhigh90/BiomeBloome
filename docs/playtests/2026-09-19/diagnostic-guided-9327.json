@@ -1,0 +1,312 @@
+{
+  "checkpoint_populations": {
+    "first_family": 6,
+    "first_meal": 4,
+    "hunt_and_recover": 13,
+    "living_balance": 20,
+    "nursery_network": 11,
+    "two_homes": 6
+  },
+  "checkpoint_times": {
+    "first_family": 32.4,
+    "first_meal": 13.8,
+    "hunt_and_recover": 174.9,
+    "living_balance": 350.8,
+    "nursery_network": 57.3,
+    "two_homes": 48.4
+  },
+  "checkpoint_waits": {
+    "first_family": 18.6,
+    "first_meal": 13.8,
+    "hunt_and_recover": 117.6,
+    "living_balance": 175.9,
+    "nursery_network": 8.9,
+    "two_homes": 16.0
+  },
+  "completed": true,
+  "current_progress": {
+    "birth_count": 18,
+    "birth_target": 0,
+    "criteria": [
+      {
+        "current": 3,
+        "id": "safe_havens",
+        "kind": "rabbit",
+        "label": "Separated nurseries",
+        "met": true,
+        "metric_label": "NURSERIES",
+        "minimum_local_food": 10.0,
+        "minimum_separation": 240.0,
+        "rabbits_per_group": 3,
+        "target": 3,
+        "type": "safe_havens"
+      },
+      {
+        "birth_target": 3,
+        "births": 14,
+        "current": 4,
+        "fox_count": 2,
+        "fox_target": 2,
+        "hunt_target": 3,
+        "hunts": 3,
+        "id": "living_window",
+        "kind": "leaf",
+        "label": "Living birth-and-hunt window",
+        "met": true,
+        "metric_label": "LIVING WINDOW",
+        "rabbit_count": 20,
+        "rabbit_target": 12,
+        "target": 4,
+        "type": "ecology_window",
+        "window": 150.0
+      },
+      {
+        "current": 10,
+        "id": "prey_balance",
+        "kind": "rabbit",
+        "label": "Rabbits per fox",
+        "met": true,
+        "metric_label": "PREY BALANCE",
+        "target": 5,
+        "type": "prey_per_fox"
+      }
+    ],
+    "evidence_met": true,
+    "evidence_window": 0.0,
+    "fed_born_count": 19,
+    "fed_founder_count": 1,
+    "fed_fox_count": 1,
+    "fox_count": 2,
+    "fox_target": 0,
+    "goals": [
+      {
+        "current": 3,
+        "id": "safe_havens",
+        "kind": "rabbit",
+        "label": "Separated nurseries",
+        "met": true,
+        "metric_label": "NURSERIES",
+        "minimum_local_food": 10.0,
+        "minimum_separation": 240.0,
+        "rabbits_per_group": 3,
+        "target": 3,
+        "type": "safe_havens"
+      },
+      {
+        "birth_target": 3,
+        "births": 14,
+        "current": 4,
+        "fox_count": 2,
+        "fox_target": 2,
+        "hunt_target": 3,
+        "hunts": 3,
+        "id": "living_window",
+        "kind": "leaf",
+        "label": "Living birth-and-hunt window",
+        "met": true,
+        "metric_label": "LIVING WINDOW",
+        "rabbit_count": 20,
+        "rabbit_target": 12,
+        "target": 4,
+        "type": "ecology_window",
+        "window": 150.0
+      },
+      {
+        "current": 10,
+        "id": "prey_balance",
+        "kind": "rabbit",
+        "label": "Rabbits per fox",
+        "met": true,
+        "metric_label": "PREY BALANCE",
+        "target": 5,
+        "type": "prey_per_fox"
+      },
+      {
+        "current": 0,
+        "id": "rabbit_health",
+        "kind": "rabbit",
+        "label": "Rabbit hunger",
+        "met": true,
+        "metric_label": "RABBITS HUNGER",
+        "population": 20,
+        "status": "hungry",
+        "target": 3,
+        "tooltip": "0 of 20 rabbits starving. This checkpoint pauses above 3.",
+        "type": "health",
+        "unmet_state": "danger",
+        "warning_count": 3
+      }
+    ],
+    "hold_active": true,
+    "hunt_count": 3,
+    "hunt_target": 0,
+    "milestone_id": "living_balance",
+    "phase": "stabilizing",
+    "populations_met": true,
+    "rabbit_count": 20,
+    "rabbit_target": 0,
+    "safe_haven_count": 3,
+    "sequence": [],
+    "sequence_completed": false,
+    "sequence_progress": 0,
+    "sequence_started": false,
+    "sequence_time_remaining": 0.0,
+    "stability_elapsed": 4.0,
+    "stability_target": 4.0,
+    "start_rabbit_population": 13,
+    "starvation_met": true,
+    "trend_met": true
+  },
+  "evidence_times": {
+    "first_family": 20.5,
+    "first_meal": 5.9,
+    "hunt_and_recover": 153.0,
+    "living_balance": 344.5,
+    "nursery_network": 49.4,
+    "two_homes": 32.4
+  },
+  "fox_cap": 80,
+  "fox_placements": 3,
+  "fox_starvation_losses": 0,
+  "foxes": 2,
+  "longest_checkpoint_wait": 175.9,
+  "maximum_evidence_streaks": {
+    "first_family": 11.9,
+    "first_meal": 7.89999999999999,
+    "hunt_and_recover": 21.9,
+    "living_balance": 4.0,
+    "nursery_network": 7.89999999999999,
+    "two_homes": 16.0
+  },
+  "natural_births": 28,
+  "nursery_layout": [
+    {
+      "behavior": "shift",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-266.1536, -174.0828)"
+    },
+    {
+      "behavior": "eat",
+      "home": "(220.7803, -147.681)",
+      "position": "(193.0234, -189.1521)"
+    },
+    {
+      "behavior": "shift",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-237.5007, -214.9872)"
+    },
+    {
+      "behavior": "flee",
+      "home": "(143.1011, 204.7104)",
+      "position": "(104.4301, 216.5093)"
+    },
+    {
+      "behavior": "loaf",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-273.5758, -151.1737)"
+    },
+    {
+      "behavior": "eat",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-275.4047, -212.0607)"
+    },
+    {
+      "behavior": "loaf",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-307.4432, -240.4182)"
+    },
+    {
+      "behavior": "shift",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-239.5802, -172.2331)"
+    },
+    {
+      "behavior": "flee",
+      "home": "(143.1011, 204.7104)",
+      "position": "(84.51411, 269.4242)"
+    },
+    {
+      "behavior": "shift",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-288.6553, -218.9366)"
+    },
+    {
+      "behavior": "loaf",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-233.253, -192.1716)"
+    },
+    {
+      "behavior": "flee",
+      "home": "(143.1011, 204.7104)",
+      "position": "(85.34018, 257.7071)"
+    },
+    {
+      "behavior": "seek_food",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-285.334, -196.1833)"
+    },
+    {
+      "behavior": "eat",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-304.6223, -194.6448)"
+    },
+    {
+      "behavior": "eat",
+      "home": "(220.7803, -147.681)",
+      "position": "(208.2938, -170.7656)"
+    },
+    {
+      "behavior": "flee",
+      "home": "(143.1011, 204.7104)",
+      "position": "(74.4453, 269.353)"
+    },
+    {
+      "behavior": "eat",
+      "home": "(220.7803, -147.681)",
+      "position": "(192.3604, -185.2294)"
+    },
+    {
+      "behavior": "return_home",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-267.725, -212.0898)"
+    },
+    {
+      "behavior": "shift",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-273.382, -188.5533)"
+    },
+    {
+      "behavior": "return_home",
+      "home": "(-285.1543, -195.1543)",
+      "position": "(-317.668, -214.0008)"
+    }
+  ],
+  "rabbit_cap": 400,
+  "rabbit_high": 22,
+  "rabbit_hunger": {
+    "highest_ratio": 0.811637946917465,
+    "population": 20,
+    "starvation_at": 78.0,
+    "starving_count": 0,
+    "state": "foraging",
+    "unserved_count": 0,
+    "warning_at": 56.0,
+    "warning_count": 3
+  },
+  "rabbit_low": 4,
+  "rabbits": 20,
+  "sandbox_continued": true,
+  "seed": 9327,
+  "separated_havens_now": 2,
+  "simulation_time": 350.8,
+  "starvation_losses": 3,
+  "starvation_times": [
+    126.8,
+    129.0,
+    132.2
+  ],
+  "state": "sandbox",
+  "stopped_at": "complete",
+  "successful_hunts": 5,
+  "supplies_claimed": 3
+}

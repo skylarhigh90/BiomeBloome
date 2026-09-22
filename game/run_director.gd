@@ -35,6 +35,7 @@ var milestone_born_rabbit_ids: Dictionary = {}
 var milestone_birth_event_indices: Dictionary = {}
 var milestone_birth_positions: Array[Vector2] = []
 var milestone_evidence_revision := 0
+var milestone_start_rabbit_population := -1
 var placed_rabbit_ids: Dictionary = {}
 var born_rabbit_ids: Dictionary = {}
 var sequence_progress := 0
@@ -131,12 +132,14 @@ func record_predation(fox_id: int, rabbit_id: int, _position: Vector2) -> void:
 		return
 	milestone_hunts += 1
 	milestone_fed_fox_ids[fox_id] = true
-	_record_ecology_event("hunt", rabbit_id)
+	_record_ecology_event("hunt", fox_id)
 
 func tick(delta: float, simulation: EcosystemSimulation, _inventory: Dictionary = {}, _supply_choices: Array = [], supply_pending: bool = false) -> void:
 	if delta <= 0.0:
 		return
 	clock_time = simulation.simulation_time
+	if milestone_start_rabbit_population < 0 and run_state == STATE_PLAYING:
+		milestone_start_rabbit_population = simulation.population("rabbit")
 	_trim_recent_deaths()
 	if run_state in [STATE_GAME_OVER, STATE_COMPLETED, STATE_SANDBOX]:
 		return
@@ -215,6 +218,7 @@ func milestone_progress(simulation: EcosystemSimulation) -> Dictionary:
 		"sequence_completed": sequence_completed,
 		"sequence_time_remaining": sequence_remaining,
 		"evidence_window": evidence_window,
+		"start_rabbit_population": milestone_start_rabbit_population,
 		"criteria": criterion_progress,
 		"goals": goals,
 	}
@@ -235,6 +239,11 @@ func objective_lens_snapshot(simulation: EcosystemSimulation) -> Dictionary:
 	}
 	if not bool(snapshot["active"]):
 		return snapshot
+	var young_journey_visible := false
+	for configured in milestone.get("criteria", []):
+		if str(configured.get("type", "")) == "born_rabbit_fed":
+			young_journey_visible = true
+			break
 
 	for configured in milestone.get("criteria", []):
 		var criterion: Dictionary = configured
@@ -242,6 +251,10 @@ func objective_lens_snapshot(simulation: EcosystemSimulation) -> Dictionary:
 		var criterion_id := str(criterion.get("id", criterion_type))
 		match criterion_type:
 			"rabbit_birth":
+				# The young-forager marker already carries richer live state for the
+				# same newborn. Avoid drawing a second overlapping "recorded" marker.
+				if young_journey_visible:
+					continue
 				for entity_id in milestone_born_rabbit_ids:
 					if not simulation.rabbits.has(entity_id):
 						continue
@@ -543,6 +556,13 @@ func _criterion_progress(criterion: Dictionary, milestone: Dictionary, simulatio
 		"prey_per_fox":
 			var fox_count := simulation.population("fox")
 			current = simulation.population("rabbit") if fox_count <= 0 else floori(float(simulation.population("rabbit")) / float(fox_count))
+		"productive_forages":
+			current = _productive_forage_type_count(criterion, simulation)
+		"population_recovery":
+			target = maxi(int(criterion.get("minimum", 0)), maxi(0, milestone_start_rabbit_population))
+			current = simulation.population("rabbit")
+		"ecology_window":
+			return _ecology_window_progress(criterion, simulation)
 		_:
 			target = 1
 			current = 1
@@ -560,6 +580,64 @@ func _criterion_progress(criterion: Dictionary, milestone: Dictionary, simulatio
 		if criterion.has(detail):
 			result[detail] = criterion[detail]
 	return result
+
+func _productive_forage_type_count(criterion: Dictionary, simulation: EcosystemSimulation) -> int:
+	var minimum_factor := float(criterion.get("minimum_capacity_factor", 0.78))
+	var productive_types: Dictionary = {}
+	for plant in simulation.plants.values():
+		var plant_type := str(plant.get("type", ""))
+		if plant_type not in criterion.get("plant_types", []):
+			continue
+		if float(plant.get("habitat_capacity_factor", 0.0)) + 0.000001 < minimum_factor:
+			continue
+		if simulation.plant_is_food_available(plant):
+			productive_types[plant_type] = true
+	return productive_types.size()
+
+func _ecology_window_progress(criterion: Dictionary, simulation: EcosystemSimulation) -> Dictionary:
+	var window := float(criterion.get("window", 120.0))
+	var births := 0
+	var hunts := 0
+	for event in milestone_events:
+		if clock_time - float(event.get("time", 0.0)) > window:
+			continue
+		if str(event.get("type", "")) == "birth":
+			births += 1
+		elif str(event.get("type", "")) == "hunt":
+			hunts += 1
+	var birth_target := int(criterion.get("birth_target", 1))
+	var hunt_target := int(criterion.get("hunt_target", 1))
+	var rabbit_target := int(criterion.get("rabbit_minimum", 0))
+	var fox_target := int(criterion.get("fox_minimum", 0))
+	var conditions := [
+		births >= birth_target,
+		hunts >= hunt_target,
+		simulation.population("rabbit") >= rabbit_target,
+		simulation.population("fox") >= fox_target,
+	]
+	var completed := 0
+	for condition in conditions:
+		if condition:
+			completed += 1
+	return {
+		"id": str(criterion.get("id", "ecology_window")),
+		"type": "ecology_window",
+		"label": str(criterion.get("label", "Living window")),
+		"metric_label": str(criterion.get("metric_label", "LIVING WINDOW")),
+		"kind": str(criterion.get("kind", "leaf")),
+		"current": completed,
+		"target": conditions.size(),
+		"met": completed >= conditions.size(),
+		"births": births,
+		"birth_target": birth_target,
+		"hunts": hunts,
+		"hunt_target": hunt_target,
+		"rabbit_count": simulation.population("rabbit"),
+		"rabbit_target": rabbit_target,
+		"fox_count": simulation.population("fox"),
+		"fox_target": fox_target,
+		"window": window,
+	}
 
 ## Identity-level truth for born-animal feeding criteria. Both aggregate
 ## progress and the Objective Lens consume this result, so a marker can never
@@ -695,7 +773,7 @@ func _criterion_target(results: Array, criterion_type: String) -> int:
 	return 0
 
 func _criterion_kind(criterion_type: String) -> String:
-	if criterion_type in ["founders_fed", "rabbit_birth", "born_rabbit_fed", "safe_havens", "separated_birth_zones", "prey_per_fox"]:
+	if criterion_type in ["founders_fed", "rabbit_birth", "born_rabbit_fed", "safe_havens", "separated_birth_zones", "prey_per_fox", "population_recovery"]:
 		return "rabbit"
 	if criterion_type in ["hunts", "distinct_foxes_fed"]:
 		return "fox"
@@ -785,6 +863,7 @@ func _complete_current_milestone() -> void:
 func _reset_milestone_evidence() -> void:
 	milestone_evidence_revision += 1
 	milestone_stability = 0.0
+	milestone_start_rabbit_population = -1
 	milestone_rabbit_births = 0
 	milestone_hunts = 0
 	milestone_events.clear()

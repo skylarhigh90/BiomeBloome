@@ -1,0 +1,456 @@
+--- before/config/game_config.gd
++++ after/config/game_config.gd
+@@ -30,14 +30,14 @@
+ 			"wander_turn_response": 2.8,
+ 			"wander_noise_interval_min": 0.45,
+ 			"wander_noise_interval_max": 1.25,
+-			"personal_space_min": 20.0,
+-			"personal_space_max": 30.0,
++			"personal_space_min": 28.0,
++			"personal_space_max": 36.0,
+ 			"separation_strength": 0.58,
+ 			"food_crowding_penalty": 26.0,
+ 			"food_stock_preference": 38.0,
+ 			# One complete fixed-step bite. Smaller scraps do not count as a usable
+ 			# meal even before a patch crosses its depletion threshold.
+-			"minimum_food_bite": 0.45,
++			"minimum_food_bite": 0.12,
+ 			"hunger_rate": 1.45,
+ 			# Rabbits begin looking before they are in visible distress. Hunger still
+ 			# controls appetite, but food should be a noticeable influence on movement.
+@@ -83,7 +83,14 @@
+ 			# indefinitely until they starve beside usable food.
+ 			"starving_threat_radius_factor": 0.48,
+ 			"eat_distance": 13.0,
+-			"eat_rate": 4.5,
++			# Intake is spread across a visible feeding bout. Food value and daily
++			# hunger costs are unchanged; eating now occupies real simulation time.
++			"eat_rate": 1.2,
++			"feeding_site_radius": 24.0,
++			"feeding_arrival_distance": 5.0,
++			"rest_duration": 4.0,
++			"observe_duration": 1.2,
++			"hop_frequency": 2.4,
+ 			"food_value": 7.5,
+ 			"mating_radius": 82.0,
+ 			"reproduction_cooldown": 34.0,
+@@ -457,9 +464,10 @@
+ 					},
+ 					"guidance": "Use the habitat preview to place both food types well, then support two groups of three rabbits around separate forage sites.",
+ 					"teaser": "A third nursery will make the meadow resilient enough for predators.",
+-					"completion_message": "Two lasting homes · Transplant charge gained",
++					"completion_message": "Two lasting homes · Nursery starters and Transplant charge gained",
+ 					"effects": {
+ 						"expand_world": WORLD_EXPANSION_STEP * 1.5,
++						"introduction": {"rabbit": 3, "carrot_patch": 2},
+ 						"transplant_charges": 1,
+ 					},
+ 				},
+@@ -505,7 +513,7 @@
+ 						"evidence": "One more lasting home will complete the network...",
+ 						"stabilizing": "The nursery network is holding...",
+ 					},
+-					"guidance": "Keep the first two homes supplied while establishing one more separated nursery.",
++					"guidance": "Use your nursery starters: place food at a separate site, then settle 3 rabbits together there. The rabbit preview counts nearby companions.",
+ 					"teaser": "Tracks have appeared. Two hunters are waiting beyond the meadow.",
+ 					"completion_message": "The nursery network is ready · Foxes have arrived",
+ 					"effects": {
+@@ -595,12 +603,12 @@
+ 					"id": "living_balance",
+ 					"tier": "final",
+ 					"title": "Living Balance",
+-					"summary": "Keep 3 nurseries while births and hunts share one living window.",
++					"summary": "Keep 2 nurseries thriving while births and hunts share one living window.",
+ 					"guide_intro": "The final proof measures outcomes, not event order. Build enough forage and refuge that three births and three hunts can coexist within the same recent window.",
+ 					"goal_help": {
+ 						"safe_havens": {
+ 							"behavior": "LIVE · CAN RISE OR FALL",
+-							"detail": "A nursery is at least three rabbits gathered around enough usable nearby food. Keep three groups in separate parts of the meadow; numbered cradle markers show which groups count right now.",
++							"detail": "A nursery is at least three rabbits gathered around enough usable nearby food. Keep two separated groups thriving through predator pressure. Your third home provides a reserve when one group scatters; numbered cradle markers show the groups that count now.",
+ 						},
+ 						"living_window": {
+ 							"behavior": "RECENT WINDOW · UPDATES LIVE",
+@@ -629,7 +637,7 @@
+ 							"label": "Separated nurseries",
+ 							"metric_label": "NURSERIES",
+ 							"lens_label": "Nursery",
+-							"target": 3,
++							"target": 2,
+ 							"rabbits_per_group": 3,
+ 							"minimum_separation": 240.0,
+ 							"minimum_local_food": 10.0,
+@@ -661,7 +669,7 @@
+ 						"evidence": "The living web still needs fresh renewal...",
+ 						"stabilizing": "The whole meadow is holding together...",
+ 					},
+-					"guidance": "Keep three nurseries supplied and enough rabbits alive for two foxes. Births and hunts may happen in any order, but both must stay recent.",
++					"guidance": "Keep two nurseries thriving through the hunts; the third home is your reserve. Support both foxes while births replace the losses.",
+ 					"teaser": "What happens next belongs to the meadow.",
+ 					"completion_message": "Ecosystem Established",
+ 					"effects": {"complete_run": true},
+--- before/simulation/ecosystem_simulation.gd
++++ after/simulation/ecosystem_simulation.gd
+@@ -93,6 +93,16 @@
+ 		"previous_position": position,
+ 		"velocity": velocity,
+ 		"previous_velocity": velocity,
++		"motion_velocity": velocity,
++		"facing": direction.angle(),
++		"previous_facing": direction.angle(),
++		"gait_phase": 0.0,
++		"previous_gait_phase": 0.0,
++		"feeding_position": Vector2.INF,
++		"feeding_plant_position": Vector2.INF,
++		"feeding_bout_active": false,
++		"rest_timer": 0.0,
++		"shift_timer": 0.0,
+ 		"age": 0.0 if reason == "birth" else rng.randf_range(cfg["adult_age"], cfg["adult_age"] + 12.0),
+ 		"hunger": 17.0 + state_jitter * 1.5 if reason == "birth" else rng.randf_range(9.0, 22.0),
+ 		"food_motivated": false,
+@@ -458,8 +468,11 @@
+ 		# Direct test/debug state changes and future loading can put biomass below
+ 		# the threshold without passing through _consume_plant.
+ 		_update_plant_ecology_state(plant)
+-		var suitability: float = plant.get("habitat_suitability", terrain.food_suitability(plant["type"], plant["position"]))
+-		plant["habitat_suitability"] = suitability
++		# Dictionary.get evaluates its fallback eagerly. Recomputing unchanged
++		# terrain suitability for every patch every tick dominated plant updates.
++		if not plant.has("habitat_suitability"):
++			plant["habitat_suitability"] = terrain.food_suitability(plant["type"], plant["position"])
++		var suitability: float = plant["habitat_suitability"]
+ 		plant["food"] = minf(plant["max_food"], plant["food"] + plant["regeneration"] * suitability * delta)
+ 		_update_plant_ecology_state(plant)
+ 
+@@ -581,6 +594,8 @@
+ 	var cfg: Dictionary = config["rabbit"]
+ 	rabbit["previous_position"] = rabbit["position"]
+ 	rabbit["previous_velocity"] = rabbit["velocity"]
++	rabbit["previous_facing"] = rabbit.get("facing", Vector2(rabbit["velocity"]).angle())
++	rabbit["previous_gait_phase"] = rabbit.get("gait_phase", 0.0)
+ 	rabbit["age"] += delta
+ 	rabbit["hunger"] += cfg["hunger_rate"] * delta
+ 	rabbit["recent_food"] = maxf(0.0, rabbit["recent_food"] - cfg["recent_food_decay"] * delta)
+@@ -621,6 +636,7 @@
+ 			)
+ 			should_flee = not prepared_refuge.is_empty()
+ 	if should_flee:
++		rabbit["rest_timer"] = 0.0
+ 		rabbit["behavior"] = "flee"
+ 		var active_flee_speed := float(cfg["flee_speed"])
+ 		if float(rabbit.get("flee_stamina", 0.0)) > 0.0:
+@@ -721,9 +737,13 @@
+ 		if target_valid:
+ 			var food: Dictionary = plants[rabbit["target_id"]]
+ 			rabbit["behavior"] = "seek_food"
+-			desired = _velocity_along_route(rabbit, food["position"], food["id"], cfg["move_speed"] * rabbit["speed_scale"], false)
+-			if position.distance_to(food["position"]) <= cfg["eat_distance"]:
++			var feeding_position := _rabbit_feeding_position(rabbit, food)
++			var distance := position.distance_to(feeding_position)
++			var approach_speed: float = minf(cfg["move_speed"] * rabbit["speed_scale"], distance * 3.0)
++			desired = _velocity_along_route(rabbit, feeding_position, food["id"], approach_speed, false)
++			if distance <= float(cfg["feeding_arrival_distance"]):
+ 				_consume_plant(rabbit, food, delta)
++				rabbit["facing"] = lerp_angle(float(rabbit["facing"]), position.direction_to(food["position"]).angle(), 1.0 - exp(-8.0 * delta))
+ 		elif hungry:
+ 			rabbit["behavior"] = "forage"
+ 			_set_rabbit_target(rabbit, -1)
+@@ -737,6 +757,11 @@
+ 				rabbit["behavior"] = "wander"
+ 				_clear_ground_route(rabbit)
+ 				desired = _rabbit_wander_velocity(rabbit, cfg["move_speed"], delta)
++	# Activities own their motor. No ambient steering may move a planted animal.
++	if rabbit["behavior"] in ["eat", "loaf", "socialize", "observe"]:
++		rabbit["velocity"] = Vector2.ZERO
++		rabbit["motion_velocity"] = Vector2.ZERO
++		return _update_mortality(rabbit, cfg, delta)
+ 	var separation_scale: float = cfg["separation_strength"]
+ 	if rabbit["behavior"] == "flee":
+ 		separation_scale = 0.24
+@@ -754,7 +779,43 @@
+ 		var home_pace := float(cfg["home_mating_speed_factor"]) if rabbit["behavior"] == "socialize" else float(cfg["home_loaf_speed_factor"])
+ 		desired = desired.limit_length(float(cfg["move_speed"]) * home_pace)
+ 	_move_entity(rabbit, desired, cfg["steering"] * rabbit["turn_scale"], delta)
++	if Vector2(rabbit["velocity"]).length_squared() > 1.0:
++		rabbit["facing"] = lerp_angle(float(rabbit["facing"]), Vector2(rabbit["velocity"]).angle(), 1.0 - exp(-10.0 * delta))
+ 	return _update_mortality(rabbit, cfg, delta)
++
++func _rabbit_feeding_position(rabbit: Dictionary, plant: Dictionary) -> Vector2:
++	var retained: Vector2 = rabbit.get("feeding_position", Vector2.INF)
++	if retained != Vector2.INF and rabbit.get("feeding_plant_position", Vector2.INF) == plant["position"]:
++		return retained
++	var best: Vector2 = plant["position"]
++	var best_score := INF
++	var radius := float(config["rabbit"]["feeding_site_radius"])
++	# A rabbit already beside food can plant its feet where it stands if that
++	# spot is free. It need not walk away before taking a life-saving first bite.
++	if Vector2(rabbit["position"]).distance_to(plant["position"]) <= float(config["rabbit"]["eat_distance"]) and _rabbit_separation(rabbit).length() < 0.16:
++		best = rabbit["position"]
++		best_score = 0.0
++	for index in range(6):
++		if best_score <= 0.0:
++			break
++		var candidate: Vector2 = plant["position"] + Vector2.from_angle(float(index) * TAU / 6.0) * radius
++		if not is_position_valid(candidate) or not positions_ground_reachable(plant["position"], candidate, radius * 1.5):
++			continue
++		var score: float = Vector2(rabbit["position"]).distance_to(candidate)
++		for entry in query_nearby("rabbit", candidate, 60.0):
++			if entry["id"] == rabbit["id"] or not rabbits.has(entry["id"]):
++				continue
++			var other: Dictionary = rabbits[entry["id"]]
++			var occupied: Vector2 = other.get("feeding_position", Vector2.INF)
++			if occupied == Vector2.INF: occupied = other["position"]
++			score += maxf(0.0, 28.0 - candidate.distance_to(occupied)) * 8.0
++		if score < best_score:
++			best_score = score
++			best = candidate
++	rabbit["feeding_position"] = best
++	rabbit["feeding_plant_position"] = plant["position"]
++	_set_ground_route(rabbit, best, plant["id"])
++	return best
+ 
+ func _rabbit_refuge_evasion_velocity(rabbit: Dictionary, threat_position: Vector2, speed: float) -> Vector2:
+ 	var position: Vector2 = rabbit["position"]
+@@ -971,7 +1032,7 @@
+ 	var activity_radius: float = float(cfg["home_mating_radius"]) if gathering else float(cfg["home_loaf_radius"])
+ 	var pace_factor: float = float(cfg["home_mating_speed_factor"]) if gathering else float(cfg["home_loaf_speed_factor"])
+ 	var was_returning: bool = rabbit["behavior"] == "return_home"
+-	if distance > float(cfg["home_return_radius"]) or (was_returning and distance > activity_radius):
++	if distance > float(cfg["home_return_radius"]) or ((was_returning or gathering) and distance > activity_radius):
+ 		rabbit["behavior"] = "return_home"
+ 		var route_id := RABBIT_HOME_ROUTE_BASE - int(rabbit["id"])
+ 		var routed := _velocity_along_route(
+@@ -985,9 +1046,28 @@
+ 			return routed
+ 		return rabbit["position"].direction_to(home_position) * speed * float(cfg["home_return_speed_factor"])
+ 
+-	rabbit["behavior"] = "socialize" if gathering else "loaf"
+ 	if int(rabbit.get("route_target_id", -1)) == RABBIT_HOME_ROUTE_BASE - int(rabbit["id"]):
+ 		_clear_ground_route(rabbit)
++	var separation := _rabbit_separation(rabbit)
++	# A resting animal yields its space in one short shift, then plants again.
++	# Hunger and danger are evaluated before this action on every fixed step.
++	if separation.length() > 0.10:
++		rabbit["behavior"] = "shift"
++		rabbit["rest_timer"] = 0.0
++		return separation * speed * 0.65
++	if float(rabbit.get("shift_timer", 0.0)) > 0.0:
++		rabbit["shift_timer"] = maxf(0.0, float(rabbit["shift_timer"]) - delta)
++		rabbit["behavior"] = "shift"
++		return _rabbit_wander_velocity(rabbit, speed * pace_factor, delta)
++	if distance <= activity_radius + 18.0:
++		if float(rabbit.get("rest_timer", 0.0)) <= 0.0:
++			rabbit["rest_timer"] = float(cfg["rest_duration"]) + float(int(rabbit["id"]) % 4) * 0.5 + float(cfg["observe_duration"])
++		rabbit["rest_timer"] = maxf(0.0, float(rabbit["rest_timer"]) - delta)
++		rabbit["behavior"] = "observe" if float(rabbit["rest_timer"]) < float(cfg["observe_duration"]) else ("socialize" if gathering else "loaf")
++		if float(rabbit["rest_timer"]) <= 0.0:
++			rabbit["shift_timer"] = 1.2
++		return Vector2.ZERO
++	rabbit["behavior"] = "shift"
+ 	var local_wander: Vector2 = _rabbit_wander_velocity(rabbit, speed * pace_factor, delta)
+ 	if distance <= activity_radius:
+ 		return local_wander
+@@ -1016,8 +1096,18 @@
+ 	if edge_distance > edge_radius - 42.0:
+ 		var edge_strength := clampf((edge_distance - (edge_radius - 42.0)) / 42.0, 0.0, 1.0)
+ 		desired = desired.lerp(-position.normalized() * maxf(desired.length(), 35.0), edge_strength)
+-	var velocity: Vector2 = entity["velocity"]
++	var is_rabbit := str(entity["type"]) == "rabbit"
++	var velocity: Vector2 = entity.get("motion_velocity", entity["velocity"]) if is_rabbit else entity["velocity"]
+ 	velocity = velocity.lerp(desired, 1.0 - exp(-steering * delta))
++	if is_rabbit:
++		entity["motion_velocity"] = velocity
++		var pace := clampf(velocity.length() / maxf(1.0, float(config["rabbit"]["move_speed"])), 0.0, 1.7)
++		if pace > 0.04:
++			var phase: float = float(entity.get("gait_phase", 0.0)) + delta * float(config["rabbit"]["hop_frequency"]) * sqrt(pace)
++			entity["gait_phase"] = phase
++			# Forward impulse and rendered takeoff/landing share this fixed-step
++			# phase. Mean impulse is one; acceleration still belongs to the motor.
++			velocity *= 1.0 - cos(phase * TAU) * 0.72
+ 	var next_position := position + velocity * delta
+ 	if not is_inside_world(next_position):
+ 		velocity = velocity.bounce(position.normalized()).lerp(-position.normalized() * velocity.length(), 0.65)
+@@ -1085,6 +1175,9 @@
+ 		else:
+ 			rabbit_food_target_claims.erase(previous_id)
+ 	rabbit["target_id"] = target_id
++	rabbit["feeding_position"] = Vector2.INF
++	rabbit["feeding_plant_position"] = Vector2.INF
++	rabbit["feeding_bout_active"] = false
+ 	if plants.has(target_id):
+ 		rabbit_food_target_claims[target_id] = int(rabbit_food_target_claims.get(target_id, 0)) + 1
+ 
+@@ -1305,13 +1398,16 @@
+ 	memory[plant["id"]] = simulation_time
+ 	rabbit["food_memory"] = memory
+ 	rabbit["behavior"] = "eat"
+-	var first_meal := int(rabbit.get("meals", 0)) == 0
+-	rabbit["meals"] = int(rabbit.get("meals", 0)) + 1
+-	_set_animal_event(rabbit, "Found a first meal" if first_meal else "Ate nearby forage")
+ 	plant_eaten.emit(plant["id"], plant["position"])
+ 	creature_fed.emit("rabbit", rabbit["id"], plant["id"])
+-	if first_meal:
+-		animal_story.emit("rabbit", rabbit["id"], "first_meal", plant["id"], rabbit["position"])
++	# A meal is one feeding visit, including an interrupted visit, never a tick.
++	if not bool(rabbit.get("feeding_bout_active", false)):
++		rabbit["feeding_bout_active"] = true
++		var first_meal := int(rabbit.get("meals", 0)) == 0
++		rabbit["meals"] = int(rabbit.get("meals", 0)) + 1
++		_set_animal_event(rabbit, "Found a first meal" if first_meal else "Ate nearby forage")
++		if first_meal:
++			animal_story.emit("rabbit", rabbit["id"], "first_meal", plant["id"], rabbit["position"])
+ 
+ func _update_mortality(entity: Dictionary, cfg: Dictionary, delta: float) -> bool:
+ 	if entity["hunger"] >= cfg["starvation_threshold"]:
+@@ -1670,7 +1766,9 @@
+ 			"seek_food": "Heading to food",
+ 			"eat": "Eating",
+ 			"loaf": "Resting near home",
+-			"socialize": "Gathering at home",
++			"socialize": "Resting with the colony",
++			"observe": "Watching the meadow",
++			"shift": "Finding a resting spot",
+ 			"return_home": "Returning home",
+ 			"flee": "Fleeing to safety",
+ 		}.get(behavior, "Exploring")
+--- before/simulation/temperate_wilds_terrain.gd
++++ after/simulation/temperate_wilds_terrain.gd
+@@ -280,6 +280,11 @@
+ 	return float(route_between(start, target, world_radius, maximum_distance)["distance"])
+ 
+ func direct_path_clear(start: Vector2, target: Vector2) -> bool:
++	# This predicate checks water only; route_between checks the endpoints and
++	# world boundary separately. With no stream, every intermediate water sample
++	# would be zero, so avoid sampling empty terrain for every candidate route.
++	if stream_points.size() < 2:
++		return true
+ 	var distance := start.distance_to(target)
+ 	if distance <= 0.001:
+ 		return not is_deep_water(start)
+--- before/game/game_systems.gd
++++ after/game/game_systems.gd
+@@ -284,7 +284,17 @@
+ 			if simulation.plant_is_food_available(plant) and simulation.ground_route_distance(position, plant["position"], float(config["rabbit"]["food_detection_radius"])) <= float(config["rabbit"]["food_detection_radius"]):
+ 				food_count += 1
+ 		var quality := "rich" if food_count >= 2 else ("fair" if food_count == 1 else "poor")
+-		return {"valid": true, "quality": quality, "title": "%s rabbit start" % quality.capitalize(), "detail": "%d usable forage %s within reach." % [food_count, "patch is" if food_count == 1 else "patches are"]}
++		var companions := 0
++		var nursery_radius := minf(float(config["rabbit"]["food_detection_radius"]) * 0.75, float(config["rabbit"]["mating_radius"]) * 1.65)
++		for rabbit in simulation.rabbits.values():
++			if position.distance_to(rabbit["position"]) <= nursery_radius and simulation.ground_route_distance(position, rabbit["position"], nursery_radius) <= nursery_radius:
++				companions += 1
++		var company := "%d nearby rabbits · a nursery needs 3 together." % companions
++		if companions == 0:
++			company = "No companions yet · place 3 together to start a nursery."
++		elif companions < 3:
++			company = "%d nearby · add %d to make a group of 3." % [companions, 3 - companions]
++		return {"valid": true, "quality": quality, "title": "%s rabbit start" % quality.capitalize(), "detail": "%d forage patches. %s" % [food_count, company], "nearby_rabbits": companions}
+ 	var reachable_prey := 0
+ 	for rabbit in simulation.rabbits.values():
+ 		if simulation.ground_route_distance(position, rabbit["position"], float(config["fox"]["prey_detection_radius"])) <= float(config["fox"]["prey_detection_radius"]):
+--- before/rendering/world_view.gd
++++ after/rendering/world_view.gd
+@@ -687,8 +687,21 @@
+ 		var rotation := velocity.angle() if velocity.length_squared() > 0.1 else previous_velocity.angle()
+ 		if velocity.length_squared() > 0.1 and previous_velocity.length_squared() > 0.1:
+ 			rotation = lerp_angle(previous_velocity.angle(), velocity.angle(), alpha)
++		if animal.has("facing"):
++			rotation = lerp_angle(float(animal.get("previous_facing", animal["facing"])), float(animal["facing"]), alpha)
+ 		var scale_factor := _spawn_scale(animal["id"]) * ANIMAL_VISUAL_SCALE * _zoom_compensation()
+-		draw_set_transform(position, rotation, Vector2.ONE * scale_factor)
++		var lift := 0.0
++		var stretch := Vector2.ONE
++		if animal["type"] == "rabbit" and animal["behavior"] not in ["eat", "loaf", "socialize", "observe"]:
++			var phase := fposmod(lerpf(float(animal.get("previous_gait_phase", 0.0)), float(animal.get("gait_phase", 0.0)), alpha), 1.0)
++			var flight := sin(clampf((phase - 0.15) / 0.70, 0.0, 1.0) * PI)
++			var moving := clampf(Vector2(animal.get("motion_velocity", velocity)).length() / 30.0, 0.0, 1.0)
++			lift = flight * moving * 4.8
++			stretch = Vector2(1.0 + flight * moving * 0.10, 1.0 - (1.0 - flight) * moving * 0.10)
++		# Shadows stay on the ground and retain a consistent light direction.
++		draw_set_transform(position + Vector2(0.0, 4.0 * scale_factor), 0.0, Vector2(1.0, 0.64) * scale_factor)
++		draw_circle(Vector2.ZERO, (8.2 if animal["type"] == "rabbit" else 9.6) - lift * 0.24, Color(0.07, 0.13, 0.10, 0.25 - lift * 0.012))
++		draw_set_transform(position - Vector2(0.0, lift * scale_factor), rotation, stretch * scale_factor)
+ 		if animal["type"] == "rabbit":
+ 			_draw_rabbit(animal)
+ 		else:
+@@ -711,7 +724,6 @@
+ 	return 1.0 + c3 * pow(value - 1.0, 3.0) + c1 * pow(value - 1.0, 2.0)
+ 
+ func _draw_rabbit(rabbit: Dictionary) -> void:
+-	var moving := clampf(rabbit["velocity"].length() / 72.0, 0.0, 1.0)
+ 	var rabbit_cfg: Dictionary = simulation.config["rabbit"]
+ 	var hunger: float = float(rabbit["hunger"])
+ 	var starvation_at: float = float(rabbit_cfg["starvation_threshold"])
+@@ -719,16 +731,27 @@
+ 	var hunger_ratio := hunger / starvation_at
+ 	var distress := smoothstep(0.62, 1.0, hunger_ratio)
+ 	var body_color := COLOR_RABBIT.lerp(Color("#b9b2a5"), distress * 0.52)
+-	var hop := sin(visual_clock * (5.5 + moving * 4.0) + rabbit["id"]) * moving
+-	draw_circle(Vector2(-1.0, 4.2), 8.2, Color(0.07, 0.13, 0.10, 0.25))
+-	# Ears point in the travel direction, making fleeing and foraging readable.
+-	draw_colored_polygon(PackedVector2Array([Vector2(4.0, -3.0), Vector2(13.0, -6.5), Vector2(11.0, -1.0)]), Color("#e7ded0"))
+-	draw_colored_polygon(PackedVector2Array([Vector2(4.0, 2.5), Vector2(13.0, 5.8), Vector2(10.7, 0.9)]), Color("#eee5d7"))
+-	draw_line(Vector2(6.0, -2.5), Vector2(10.6, -4.8), Color("#d7aeb0"), 1.1, true)
+-	draw_circle(Vector2(-1.0, hop * 0.5), 7.8, Color(0.19, 0.27, 0.22, 0.62))
+-	draw_circle(Vector2(-1.0, hop * 0.5), 7.2, body_color)
+-	draw_circle(Vector2(5.5, 0.0), 5.4, Color("#fbf5e9").lerp(Color("#c8c0b2"), distress * 0.46))
+-	draw_circle(Vector2(7.4, -2.2), 1.0, Color("#343333"))
++	var resting: bool = rabbit["behavior"] in ["loaf", "socialize"]
++	var eating: bool = rabbit["behavior"] == "eat"
++	var watching: bool = rabbit["behavior"] == "observe"
++	var action_time := maxf(0.0, simulation.simulation_time - (1.0 - systems.interpolation_alpha()) * float(simulation.config["simulation"]["fixed_step"]))
++	var chew := sin(action_time * 12.0 + float(rabbit["id"])) * 0.55 if eating else 0.0
++	var head := Vector2(5.5 + (1.0 if eating else 0.0) + chew, 0.0)
++	var ear_tip := 8.5 if resting else (15.0 if watching else 13.0)
++	var ear_spread := 4.5 if resting else (8.0 if watching else 6.5)
++	# Tucked ears and closed eyes distinguish resting from upright vigilance.
++	draw_colored_polygon(PackedVector2Array([Vector2(4.0, -3.0), Vector2(ear_tip, -ear_spread), Vector2(11.0, -1.0)]), Color("#e7ded0"))
++	draw_colored_polygon(PackedVector2Array([Vector2(4.0, 2.5), Vector2(ear_tip, ear_spread), Vector2(10.7, 0.9)]), Color("#eee5d7"))
++	draw_line(Vector2(6.0, -2.5), Vector2(ear_tip - 2.4, -ear_spread + 1.7), Color("#d7aeb0"), 1.1, true)
++	draw_circle(Vector2(-1.0, 0.0), 7.8, Color(0.19, 0.27, 0.22, 0.62))
++	draw_circle(Vector2(-1.0, 0.0), 7.2, body_color)
++	draw_circle(head, 5.4, Color("#fbf5e9").lerp(Color("#c8c0b2"), distress * 0.46))
++	if resting:
++		draw_line(head + Vector2(0.9, -2.2), head + Vector2(2.7, -2.2), Color("#343333"), 1.0, true)
++	else:
++		draw_circle(head + Vector2(1.9, -2.2), 1.0, Color("#343333"))
++	if eating:
++		draw_line(head + Vector2(4.8, chew), head + Vector2(7.2, -1.5 + chew), Color("#58743c"), 1.4, true)
+ 	draw_circle(Vector2(-7.0, 0.0), 2.5, Color("#ffffff"))
+ 	if rabbit["behavior"] == "flee":
+ 		draw_arc(Vector2.ZERO, 10.5, -0.8, 0.8, 12, Color(1.0, 0.86, 0.57, 0.65), 1.1, true)
+@@ -751,7 +774,6 @@
+ 	var distress := smoothstep(0.65, 1.0, hunger_ratio)
+ 	var body_color := COLOR_FOX.lerp(Color("#9e705d"), distress * 0.48)
+ 	var tail_sway := sin(visual_clock * (3.0 + pace * 3.5) + fox["id"]) * 2.2
+-	draw_circle(Vector2(-1.0, 4.8), 9.6, Color(0.07, 0.12, 0.09, 0.28))
+ 	draw_circle(Vector2(-4.0, tail_sway), 7.2, Color("#c95f39"))
+ 	draw_circle(Vector2(-10.0, tail_sway * 1.25), 4.2, Color("#f0d6b5"))
+ 	draw_circle(Vector2(0.0, 0.0), 8.9, Color(0.24, 0.24, 0.19, 0.66))
+--- before/ui/game_hud.gd
++++ after/ui/game_hud.gd
+@@ -779,7 +779,7 @@
+ 		family += " · %d %s" % [offspring_count, "young" if offspring_count == 1 else "young"]
+ 	animal_family_label.text = family
+ 	var life_count := int(snapshot["hunts"]) if inspected_animal_kind == "fox" else int(snapshot["meals"])
+-	var life_word := "hunts" if inspected_animal_kind == "fox" else "meals"
++	var life_word := "hunts" if inspected_animal_kind == "fox" else "feeding visits"
+ 	animal_history_label.text = "Recently: %s · %d %s" % [snapshot["recent_event"], life_count, life_word]
+ 	var following := followed_animal_kind == inspected_animal_kind and followed_animal_id == inspected_animal_id
+ 	animal_follow_button.text = "Stop following" if following else "Follow %s" % str(snapshot["name"])
+@@ -829,13 +829,14 @@
+ 		objective_eyebrow.text = "FIELD NOTES COMPLETE"
+ 		objective_title.text = "A living ecosystem"
+ 		objective_body.text = "The habitat continues at its own rhythm."
+-		objective_progress_view.set_goals([{
++		var observation_goals: Array[Dictionary] = [{
+ 			"id": "observation",
+ 			"label": "Observe the living ecosystem",
+ 			"value": "Ongoing",
+ 			"kind": "leaf",
+ 			"state": "success",
+-		}])
++		}]
++		objective_progress_view.set_goals(observation_goals)
+ 		objective_progress_view.set_hold_progress(1.0, "success", false)
+ 		objective_progress_view.set_guidance("")
+ 		objective_progress_view.set_next("Follow the patterns that interest you.", "Place, watch, and learn from the ecosystem without another checkpoint to complete.")

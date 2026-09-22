@@ -1,18 +1,18 @@
 extends SceneTree
 
 ## Manual narrow-viewport checkpoint capture. Run with:
-##   godot --path . --resolution 376x900 --script tests/checkpoint_visual_runner.gd -- 5 /tmp/checkpoint-5.png living_cycle
+##   godot --path . --resolution 376x900 --script tests/checkpoint_visual_runner.gd -- 6 /tmp/checkpoint-6.png living_window
 
 var game
 var frames := 0
-var checkpoint_number := 5
+var checkpoint_number := 6
 var output_path := "/private/tmp/biome-checkpoint.png"
 var explained_goal_id := ""
 
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	if not args.is_empty():
-		checkpoint_number = clampi(int(args[0]), 1, 5)
+		checkpoint_number = clampi(int(args[0]), 1, 6)
 	if args.size() > 1:
 		output_path = str(args[1])
 	if args.size() > 2:

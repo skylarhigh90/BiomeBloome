@@ -1,0 +1,1456 @@
+{
+  "actions": [
+    {
+      "action": "Place one productive forage plant near the blocked rabbit's home",
+      "assessment": {
+        "detail": "Woodland and Thicket margins give Berries their best recovery. This site supports 128% of standard capacity.",
+        "quality": "rich",
+        "score": 1.27751394742778,
+        "title": "Rich habitat",
+        "valid": true
+      },
+      "inventory_after": 1,
+      "inventory_before": 2,
+      "item": "berry_bush",
+      "plant_id": 10,
+      "position": "(-30.0, 125.0)",
+      "time": 30.0,
+      "trigger": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      }
+    }
+  ],
+  "anchor": "(0.0, 0.0)",
+  "birth_status_transitions": [
+    {
+      "id": 6,
+      "name": "Fern",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 7 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 0.0
+    },
+    {
+      "id": 7,
+      "name": "Pebble",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 5 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 0.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 4 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 0.0
+    },
+    {
+      "id": 9,
+      "name": "Bramble",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 5 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 0.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "needs_meals",
+        "detail": "Being comfortable is only the first step. Repeated meals build the reserves needed for young; reserves slowly fade between meals.",
+        "ready": false,
+        "summary": "Building food reserves · 84%"
+      },
+      "time": 4.0
+    },
+    {
+      "id": 7,
+      "name": "Pebble",
+      "status": {
+        "code": "needs_meals",
+        "detail": "Being comfortable is only the first step. Repeated meals build the reserves needed for young; reserves slowly fade between meals.",
+        "ready": false,
+        "summary": "Building food reserves · 12%"
+      },
+      "time": 5.0
+    },
+    {
+      "id": 9,
+      "name": "Bramble",
+      "status": {
+        "code": "needs_meals",
+        "detail": "Being comfortable is only the first step. Repeated meals build the reserves needed for young; reserves slowly fade between meals.",
+        "ready": false,
+        "summary": "Building food reserves · 87%"
+      },
+      "time": 5.0
+    },
+    {
+      "id": 6,
+      "name": "Fern",
+      "status": {
+        "code": "needs_meals",
+        "detail": "Being comfortable is only the first step. Repeated meals build the reserves needed for young; reserves slowly fade between meals.",
+        "ready": false,
+        "summary": "Building food reserves · 54%"
+      },
+      "time": 7.0
+    },
+    {
+      "id": 6,
+      "name": "Fern",
+      "status": {
+        "code": "mate_not_ready",
+        "detail": "A nearby adult still needs food or rest before the pair can have young. Inspect that rabbit for its next step.",
+        "ready": false,
+        "summary": "Waiting for a ready companion"
+      },
+      "time": 8.0
+    },
+    {
+      "id": 6,
+      "name": "Fern",
+      "status": {
+        "code": "needs_meals",
+        "detail": "Being comfortable is only the first step. Repeated meals build the reserves needed for young; reserves slowly fade between meals.",
+        "ready": false,
+        "summary": "Building food reserves · 98%"
+      },
+      "time": 10.0
+    },
+    {
+      "id": 9,
+      "name": "Bramble",
+      "status": {
+        "code": "mate_not_ready",
+        "detail": "A nearby adult still needs food or rest before the pair can have young. Inspect that rabbit for its next step.",
+        "ready": false,
+        "summary": "Waiting for a ready companion"
+      },
+      "time": 10.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 11.0
+    },
+    {
+      "id": 9,
+      "name": "Bramble",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 11.0
+    },
+    {
+      "id": 6,
+      "name": "Fern",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 19.0
+    },
+    {
+      "id": 7,
+      "name": "Pebble",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 20.0
+    },
+    {
+      "id": 6,
+      "name": "Fern",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 34 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 31.0
+    },
+    {
+      "id": 7,
+      "name": "Pebble",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 34 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 31.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 34 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 31.0
+    },
+    {
+      "id": 9,
+      "name": "Bramble",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 34 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 31.0
+    },
+    {
+      "id": 6,
+      "name": "Fern",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 65.0
+    },
+    {
+      "id": 7,
+      "name": "Pebble",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 65.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "needs_mate",
+        "detail": "Keep two well-fed adults together at the same home. They must be close enough to reach one another.",
+        "ready": false,
+        "summary": "Needs a nearby adult"
+      },
+      "time": 65.0
+    },
+    {
+      "id": 9,
+      "name": "Bramble",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 65.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 66.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "needs_mate",
+        "detail": "Keep two well-fed adults together at the same home. They must be close enough to reach one another.",
+        "ready": false,
+        "summary": "Needs a nearby adult"
+      },
+      "time": 114.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 115.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "needs_mate",
+        "detail": "Keep two well-fed adults together at the same home. They must be close enough to reach one another.",
+        "ready": false,
+        "summary": "Needs a nearby adult"
+      },
+      "time": 143.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 145.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "needs_mate",
+        "detail": "Keep two well-fed adults together at the same home. They must be close enough to reach one another.",
+        "ready": false,
+        "summary": "Needs a nearby adult"
+      },
+      "time": 153.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 155.0
+    },
+    {
+      "id": 7,
+      "name": "Pebble",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 34 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 175.0
+    },
+    {
+      "id": 8,
+      "name": "Sorrel",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 34 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 175.0
+    },
+    {
+      "id": 9,
+      "name": "Bramble",
+      "status": {
+        "code": "ready",
+        "detail": "Both adults have food reserves and nearby forage can support young. They can have young at the next family check if these conditions hold.",
+        "ready": true,
+        "summary": "Ready with a nearby companion"
+      },
+      "time": 188.0
+    },
+    {
+      "id": 9,
+      "name": "Bramble",
+      "status": {
+        "code": "recovering",
+        "detail": "Family rest: 34 meadow seconds left. Food and a ready companion are also needed.",
+        "ready": false,
+        "summary": "Resting before young"
+      },
+      "time": 189.0
+    },
+    {
+      "id": 9,
+      "name": "Bramble",
+      "status": {
+        "code": "local_capacity",
+        "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+        "ready": false,
+        "summary": "More nearby forage needed"
+      },
+      "time": 223.0
+    }
+  ],
+  "births": [
+    {
+      "id": 11,
+      "name": "Juniper",
+      "parents": [
+        6,
+        8
+      ],
+      "position": "(-44.14113, 15.35407)",
+      "time": 30.9
+    },
+    {
+      "id": 12,
+      "name": "Thistle",
+      "parents": [
+        7,
+        9
+      ],
+      "position": "(34.86071, 29.09294)",
+      "time": 30.9
+    },
+    {
+      "id": 13,
+      "name": "Clover II",
+      "parents": [
+        7,
+        8
+      ],
+      "position": "(-11.75825, 34.45131)",
+      "time": 175.0
+    },
+    {
+      "id": 14,
+      "name": "Pip II",
+      "parents": [
+        9,
+        11
+      ],
+      "position": "(-6.098155, 3.978278)",
+      "time": 188.2
+    },
+    {
+      "id": 15,
+      "name": "Hazel II",
+      "parents": [
+        12,
+        13
+      ],
+      "position": "(28.88098, -6.702604)",
+      "time": 205.8
+    },
+    {
+      "id": 16,
+      "name": "Moss II",
+      "parents": [
+        11,
+        15
+      ],
+      "position": "(-15.50832, 23.16101)",
+      "time": 231.1
+    }
+  ],
+  "deaths": [
+    {
+      "activity": "Finding a resting spot",
+      "age": 196.06648101806,
+      "age_ratio": 1.00025434045597,
+      "alive": false,
+      "behavior": "shift",
+      "cause": "age",
+      "cause_label": "old age",
+      "death_story": {
+        "cause": "age",
+        "description": "Fern died of old age",
+        "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+        "entity_id": 6,
+        "kind": "rabbit",
+        "position": "(-37.96353, 1.434345)",
+        "related_id": -1,
+        "time": 174.899999999994,
+        "type": "death"
+      },
+      "founder": true,
+      "home_position": "(-30.0, 25.0)",
+      "hunger_ratio": 0.297640877259076,
+      "hunger_state": "Looking for food",
+      "hunts": 0,
+      "id": 6,
+      "kind": "rabbit",
+      "lifespan": 196.016626060009,
+      "meals": 15,
+      "name": "Fern",
+      "offspring_count": 1,
+      "parent_names": [],
+      "position": "(-37.96353, 1.434345)",
+      "prior_warning_time": 132.1,
+      "prior_warning_type": "elder",
+      "recent_event": "Ate nearby forage",
+      "recorded_cause": "age",
+      "recorded_time": 174.9,
+      "stage": "Elder",
+      "starvation_time": 0.0,
+      "time": 174.899999999994,
+      "warning_lead_seconds": 42.8
+    },
+    {
+      "activity": "Finding a resting spot",
+      "age": 204.090526580803,
+      "age_ratio": 1.00011334227571,
+      "alive": false,
+      "behavior": "shift",
+      "cause": "age",
+      "cause_label": "old age",
+      "death_story": {
+        "cause": "age",
+        "description": "Sorrel died of old age",
+        "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+        "entity_id": 8,
+        "kind": "rabbit",
+        "position": "(-45.44349, 65.97074)",
+        "related_id": -1,
+        "time": 187.499999999994,
+        "type": "death"
+      },
+      "founder": true,
+      "home_position": "(-30.0, 25.0)",
+      "hunger_ratio": 0.257980855305981,
+      "hunger_state": "Looking for food",
+      "hunts": 0,
+      "id": 8,
+      "kind": "rabbit",
+      "lifespan": 204.067397117615,
+      "meals": 22,
+      "name": "Sorrel",
+      "offspring_count": 2,
+      "parent_names": [],
+      "position": "(-45.44349, 65.97074)",
+      "prior_warning_time": 142.9,
+      "prior_warning_type": "elder",
+      "recent_event": "Ate nearby forage",
+      "recorded_cause": "age",
+      "recorded_time": 187.5,
+      "stage": "Elder",
+      "starvation_time": 0.0,
+      "time": 187.499999999994,
+      "warning_lead_seconds": 44.6
+    },
+    {
+      "activity": "Resting near home",
+      "age": 227.135065078727,
+      "age_ratio": 1.00003991505719,
+      "alive": false,
+      "behavior": "loaf",
+      "cause": "age",
+      "cause_label": "old age",
+      "death_story": {
+        "cause": "age",
+        "description": "Pebble died of old age",
+        "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+        "entity_id": 7,
+        "kind": "rabbit",
+        "position": "(18.3398, 43.72878)",
+        "related_id": -1,
+        "time": 204.499999999993,
+        "type": "death"
+      },
+      "founder": true,
+      "home_position": "(30.0, 25.0)",
+      "hunger_ratio": 0.191559192461837,
+      "hunger_state": "Comfortable",
+      "hunts": 0,
+      "id": 7,
+      "kind": "rabbit",
+      "lifespan": 227.125999331474,
+      "meals": 20,
+      "name": "Pebble",
+      "offspring_count": 2,
+      "parent_names": [],
+      "position": "(18.3398, 43.72878)",
+      "prior_warning_time": 154.9,
+      "prior_warning_type": "elder",
+      "recent_event": "Ate nearby forage",
+      "recorded_cause": "age",
+      "recorded_time": 204.5,
+      "stage": "Elder",
+      "starvation_time": 0.0,
+      "time": 204.499999999993,
+      "warning_lead_seconds": 49.6
+    },
+    {
+      "activity": "Watching the meadow",
+      "age": 250.27222442626,
+      "age_ratio": 1.00013139018916,
+      "alive": false,
+      "behavior": "observe",
+      "cause": "age",
+      "cause_label": "old age",
+      "death_story": {
+        "cause": "age",
+        "description": "Bramble died of old age",
+        "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+        "entity_id": 9,
+        "kind": "rabbit",
+        "position": "(21.64544, 3.897434)",
+        "related_id": -1,
+        "time": 230.499999999991,
+        "type": "death"
+      },
+      "founder": true,
+      "home_position": "(30.0, 25.0)",
+      "hunger_ratio": 0.185758502666757,
+      "hunger_state": "Comfortable",
+      "hunts": 0,
+      "id": 9,
+      "kind": "rabbit",
+      "lifespan": 250.239345431328,
+      "meals": 29,
+      "name": "Bramble",
+      "offspring_count": 2,
+      "parent_names": [],
+      "position": "(21.64544, 3.897434)",
+      "prior_warning_time": 175.9,
+      "prior_warning_type": "elder",
+      "recent_event": "Ate nearby forage",
+      "recorded_cause": "age",
+      "recorded_time": 230.5,
+      "stage": "Elder",
+      "starvation_time": 0.0,
+      "time": 230.499999999991,
+      "warning_lead_seconds": 54.6
+    }
+  ],
+  "ecology_signature": [
+    [
+      "birth",
+      11,
+      30.9,
+      "(-44.14113, 15.35407)"
+    ],
+    [
+      "birth",
+      12,
+      30.9,
+      "(34.86071, 29.09294)"
+    ],
+    [
+      "death",
+      6,
+      174.9,
+      "age",
+      "(-37.96353, 1.434345)"
+    ],
+    [
+      "birth",
+      13,
+      175.0,
+      "(-11.75825, 34.45131)"
+    ],
+    [
+      "death",
+      8,
+      187.5,
+      "age",
+      "(-45.44349, 65.97074)"
+    ],
+    [
+      "birth",
+      14,
+      188.2,
+      "(-6.098155, 3.978278)"
+    ],
+    [
+      "death",
+      7,
+      204.5,
+      "age",
+      "(18.3398, 43.72878)"
+    ],
+    [
+      "birth",
+      15,
+      205.8,
+      "(28.88098, -6.702604)"
+    ],
+    [
+      "death",
+      9,
+      230.5,
+      "age",
+      "(21.64544, 3.897434)"
+    ],
+    [
+      "birth",
+      16,
+      231.1,
+      "(-15.50832, 23.16101)"
+    ],
+    [
+      "survivor",
+      11,
+      "(-49.05363, 13.5269)",
+      259.09999999999,
+      14.0724747848503
+    ],
+    [
+      "survivor",
+      12,
+      "(35.15656, 5.35373)",
+      259.09999999999,
+      12.7293178629865
+    ],
+    [
+      "survivor",
+      13,
+      "(8.81809, 30.80891)",
+      114.999999999998,
+      19.8638180553909
+    ],
+    [
+      "survivor",
+      14,
+      "(46.12769, 24.13034)",
+      101.799999999998,
+      17.9371028280254
+    ],
+    [
+      "survivor",
+      15,
+      "(15.81938, 5.617355)",
+      84.1999999999995,
+      14.7197654926774
+    ],
+    [
+      "survivor",
+      16,
+      "(-31.72153, 0.534376)",
+      58.9000000000006,
+      15.6935464310644
+    ]
+  ],
+  "failures": [],
+  "final_population": 6,
+  "first_birth_time": 30.9,
+  "founder_deaths": [
+    {
+      "activity": "Finding a resting spot",
+      "age": 196.06648101806,
+      "age_ratio": 1.00025434045597,
+      "alive": false,
+      "behavior": "shift",
+      "cause": "age",
+      "cause_label": "old age",
+      "death_story": {
+        "cause": "age",
+        "description": "Fern died of old age",
+        "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+        "entity_id": 6,
+        "kind": "rabbit",
+        "position": "(-37.96353, 1.434345)",
+        "related_id": -1,
+        "time": 174.899999999994,
+        "type": "death"
+      },
+      "founder": true,
+      "home_position": "(-30.0, 25.0)",
+      "hunger_ratio": 0.297640877259076,
+      "hunger_state": "Looking for food",
+      "hunts": 0,
+      "id": 6,
+      "kind": "rabbit",
+      "lifespan": 196.016626060009,
+      "meals": 15,
+      "name": "Fern",
+      "offspring_count": 1,
+      "parent_names": [],
+      "position": "(-37.96353, 1.434345)",
+      "prior_warning_time": 132.1,
+      "prior_warning_type": "elder",
+      "recent_event": "Ate nearby forage",
+      "recorded_cause": "age",
+      "recorded_time": 174.9,
+      "stage": "Elder",
+      "starvation_time": 0.0,
+      "time": 174.899999999994,
+      "warning_lead_seconds": 42.8
+    },
+    {
+      "activity": "Finding a resting spot",
+      "age": 204.090526580803,
+      "age_ratio": 1.00011334227571,
+      "alive": false,
+      "behavior": "shift",
+      "cause": "age",
+      "cause_label": "old age",
+      "death_story": {
+        "cause": "age",
+        "description": "Sorrel died of old age",
+        "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+        "entity_id": 8,
+        "kind": "rabbit",
+        "position": "(-45.44349, 65.97074)",
+        "related_id": -1,
+        "time": 187.499999999994,
+        "type": "death"
+      },
+      "founder": true,
+      "home_position": "(-30.0, 25.0)",
+      "hunger_ratio": 0.257980855305981,
+      "hunger_state": "Looking for food",
+      "hunts": 0,
+      "id": 8,
+      "kind": "rabbit",
+      "lifespan": 204.067397117615,
+      "meals": 22,
+      "name": "Sorrel",
+      "offspring_count": 2,
+      "parent_names": [],
+      "position": "(-45.44349, 65.97074)",
+      "prior_warning_time": 142.9,
+      "prior_warning_type": "elder",
+      "recent_event": "Ate nearby forage",
+      "recorded_cause": "age",
+      "recorded_time": 187.5,
+      "stage": "Elder",
+      "starvation_time": 0.0,
+      "time": 187.499999999994,
+      "warning_lead_seconds": 44.6
+    },
+    {
+      "activity": "Resting near home",
+      "age": 227.135065078727,
+      "age_ratio": 1.00003991505719,
+      "alive": false,
+      "behavior": "loaf",
+      "cause": "age",
+      "cause_label": "old age",
+      "death_story": {
+        "cause": "age",
+        "description": "Pebble died of old age",
+        "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+        "entity_id": 7,
+        "kind": "rabbit",
+        "position": "(18.3398, 43.72878)",
+        "related_id": -1,
+        "time": 204.499999999993,
+        "type": "death"
+      },
+      "founder": true,
+      "home_position": "(30.0, 25.0)",
+      "hunger_ratio": 0.191559192461837,
+      "hunger_state": "Comfortable",
+      "hunts": 0,
+      "id": 7,
+      "kind": "rabbit",
+      "lifespan": 227.125999331474,
+      "meals": 20,
+      "name": "Pebble",
+      "offspring_count": 2,
+      "parent_names": [],
+      "position": "(18.3398, 43.72878)",
+      "prior_warning_time": 154.9,
+      "prior_warning_type": "elder",
+      "recent_event": "Ate nearby forage",
+      "recorded_cause": "age",
+      "recorded_time": 204.5,
+      "stage": "Elder",
+      "starvation_time": 0.0,
+      "time": 204.499999999993,
+      "warning_lead_seconds": 49.6
+    },
+    {
+      "activity": "Watching the meadow",
+      "age": 250.27222442626,
+      "age_ratio": 1.00013139018916,
+      "alive": false,
+      "behavior": "observe",
+      "cause": "age",
+      "cause_label": "old age",
+      "death_story": {
+        "cause": "age",
+        "description": "Bramble died of old age",
+        "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+        "entity_id": 9,
+        "kind": "rabbit",
+        "position": "(21.64544, 3.897434)",
+        "related_id": -1,
+        "time": 230.499999999991,
+        "type": "death"
+      },
+      "founder": true,
+      "home_position": "(30.0, 25.0)",
+      "hunger_ratio": 0.185758502666757,
+      "hunger_state": "Comfortable",
+      "hunts": 0,
+      "id": 9,
+      "kind": "rabbit",
+      "lifespan": 250.239345431328,
+      "meals": 29,
+      "name": "Bramble",
+      "offspring_count": 2,
+      "parent_names": [],
+      "position": "(21.64544, 3.897434)",
+      "prior_warning_time": 175.9,
+      "prior_warning_type": "elder",
+      "recent_event": "Ate nearby forage",
+      "recorded_cause": "age",
+      "recorded_time": 230.5,
+      "stage": "Elder",
+      "starvation_time": 0.0,
+      "time": 230.499999999991,
+      "warning_lead_seconds": 54.6
+    }
+  ],
+  "founders": {
+    "6": "Fern",
+    "7": "Pebble",
+    "8": "Sorrel",
+    "9": "Bramble"
+  },
+  "initial_placements": {
+    "carrots": 5,
+    "rabbits": 4
+  },
+  "objective": "two_homes",
+  "seed": 240821,
+  "simulation_time": 290.0,
+  "state": "playing",
+  "status_probes": [
+    {
+      "rabbits": [
+        {
+          "id": 6,
+          "name": "Fern",
+          "status": {
+            "code": "needs_meals",
+            "detail": "Being comfortable is only the first step. Repeated meals build the reserves needed for young; reserves slowly fade between meals.",
+            "ready": false,
+            "summary": "Building food reserves · 98%"
+          }
+        },
+        {
+          "id": 7,
+          "name": "Pebble",
+          "status": {
+            "code": "needs_meals",
+            "detail": "Being comfortable is only the first step. Repeated meals build the reserves needed for young; reserves slowly fade between meals.",
+            "ready": false,
+            "summary": "Building food reserves · 93%"
+          }
+        },
+        {
+          "id": 8,
+          "name": "Sorrel",
+          "status": {
+            "code": "needs_meals",
+            "detail": "Being comfortable is only the first step. Repeated meals build the reserves needed for young; reserves slowly fade between meals.",
+            "ready": false,
+            "summary": "Building food reserves · 98%"
+          }
+        },
+        {
+          "id": 9,
+          "name": "Bramble",
+          "status": {
+            "code": "mate_not_ready",
+            "detail": "A nearby adult still needs food or rest before the pair can have young. Inspect that rabbit for its next step.",
+            "ready": false,
+            "summary": "Waiting for a ready companion"
+          }
+        }
+      ],
+      "time": 10.0
+    },
+    {
+      "rabbits": [
+        {
+          "id": 6,
+          "name": "Fern",
+          "status": {
+            "code": "local_capacity",
+            "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+            "ready": false,
+            "summary": "More nearby forage needed"
+          }
+        },
+        {
+          "id": 7,
+          "name": "Pebble",
+          "status": {
+            "code": "local_capacity",
+            "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+            "ready": false,
+            "summary": "More nearby forage needed"
+          }
+        },
+        {
+          "id": 8,
+          "name": "Sorrel",
+          "status": {
+            "code": "local_capacity",
+            "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+            "ready": false,
+            "summary": "More nearby forage needed"
+          }
+        },
+        {
+          "id": 9,
+          "name": "Bramble",
+          "status": {
+            "code": "local_capacity",
+            "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+            "ready": false,
+            "summary": "More nearby forage needed"
+          }
+        }
+      ],
+      "time": 30.0
+    },
+    {
+      "rabbits": [
+        {
+          "id": 6,
+          "name": "Fern",
+          "status": {
+            "code": "recovering",
+            "detail": "Family rest: 5 meadow seconds left. Food and a ready companion are also needed.",
+            "ready": false,
+            "summary": "Resting before young"
+          }
+        },
+        {
+          "id": 7,
+          "name": "Pebble",
+          "status": {
+            "code": "recovering",
+            "detail": "Family rest: 5 meadow seconds left. Food and a ready companion are also needed.",
+            "ready": false,
+            "summary": "Resting before young"
+          }
+        },
+        {
+          "id": 8,
+          "name": "Sorrel",
+          "status": {
+            "code": "recovering",
+            "detail": "Family rest: 5 meadow seconds left. Food and a ready companion are also needed.",
+            "ready": false,
+            "summary": "Resting before young"
+          }
+        },
+        {
+          "id": 9,
+          "name": "Bramble",
+          "status": {
+            "code": "recovering",
+            "detail": "Family rest: 5 meadow seconds left. Food and a ready companion are also needed.",
+            "ready": false,
+            "summary": "Resting before young"
+          }
+        }
+      ],
+      "time": 60.0
+    },
+    {
+      "rabbits": [
+        {
+          "id": 6,
+          "name": "Fern",
+          "status": {
+            "code": "local_capacity",
+            "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+            "ready": false,
+            "summary": "More nearby forage needed"
+          }
+        },
+        {
+          "id": 7,
+          "name": "Pebble",
+          "status": {
+            "code": "local_capacity",
+            "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+            "ready": false,
+            "summary": "More nearby forage needed"
+          }
+        },
+        {
+          "id": 8,
+          "name": "Sorrel",
+          "status": {
+            "code": "local_capacity",
+            "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+            "ready": false,
+            "summary": "More nearby forage needed"
+          }
+        },
+        {
+          "id": 9,
+          "name": "Bramble",
+          "status": {
+            "code": "local_capacity",
+            "detail": "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.",
+            "ready": false,
+            "summary": "More nearby forage needed"
+          }
+        }
+      ],
+      "time": 120.0
+    }
+  ],
+  "stories": [
+    {
+      "cause": "",
+      "description": "Fern joined the meadow",
+      "detail": "",
+      "entity_id": 6,
+      "kind": "rabbit",
+      "position": "(-22.0, -4.0)",
+      "related_id": -1,
+      "time": 0.0,
+      "type": "arrival"
+    },
+    {
+      "cause": "",
+      "description": "Pebble joined the meadow",
+      "detail": "",
+      "entity_id": 7,
+      "kind": "rabbit",
+      "position": "(22.0, -4.0)",
+      "related_id": -1,
+      "time": 0.0,
+      "type": "arrival"
+    },
+    {
+      "cause": "",
+      "description": "Sorrel joined the meadow",
+      "detail": "",
+      "entity_id": 8,
+      "kind": "rabbit",
+      "position": "(-22.0, 13.0)",
+      "related_id": -1,
+      "time": 0.0,
+      "type": "arrival"
+    },
+    {
+      "cause": "",
+      "description": "Bramble joined the meadow",
+      "detail": "",
+      "entity_id": 9,
+      "kind": "rabbit",
+      "position": "(22.0, 13.0)",
+      "related_id": -1,
+      "time": 0.0,
+      "type": "arrival"
+    },
+    {
+      "cause": "",
+      "description": "Sorrel found a first meal",
+      "detail": "",
+      "entity_id": 8,
+      "kind": "rabbit",
+      "position": "(-25.10785, 17.20218)",
+      "related_id": 4,
+      "time": 0.7,
+      "type": "first_meal"
+    },
+    {
+      "cause": "",
+      "description": "Bramble found a first meal",
+      "detail": "",
+      "entity_id": 9,
+      "kind": "rabbit",
+      "position": "(7.819092, 25.32627)",
+      "related_id": 5,
+      "time": 0.8,
+      "type": "first_meal"
+    },
+    {
+      "cause": "",
+      "description": "Fern found a first meal",
+      "detail": "",
+      "entity_id": 6,
+      "kind": "rabbit",
+      "position": "(-29.94028, -10.38048)",
+      "related_id": 1,
+      "time": 6.19999999999999,
+      "type": "first_meal"
+    },
+    {
+      "cause": "",
+      "description": "Pebble found a first meal",
+      "detail": "",
+      "entity_id": 7,
+      "kind": "rabbit",
+      "position": "(38.69451, 4.099221)",
+      "related_id": 5,
+      "time": 7.99999999999999,
+      "type": "first_meal"
+    },
+    {
+      "cause": "",
+      "description": "Juniper was born to Fern & Sorrel",
+      "detail": "",
+      "entity_id": 11,
+      "kind": "rabbit",
+      "position": "(-44.14113, 15.35407)",
+      "related_id": -1,
+      "time": 30.9000000000002,
+      "type": "birth"
+    },
+    {
+      "cause": "",
+      "description": "Thistle was born to Pebble & Bramble",
+      "detail": "",
+      "entity_id": 12,
+      "kind": "rabbit",
+      "position": "(34.86071, 29.09294)",
+      "related_id": -1,
+      "time": 30.9000000000002,
+      "type": "birth"
+    },
+    {
+      "cause": "",
+      "description": "Thistle found a first meal",
+      "detail": "",
+      "entity_id": 12,
+      "kind": "rabbit",
+      "position": "(56.09779, -11.90465)",
+      "related_id": 3,
+      "time": 33.5000000000002,
+      "type": "first_meal"
+    },
+    {
+      "cause": "",
+      "description": "Juniper found a first meal",
+      "detail": "",
+      "entity_id": 11,
+      "kind": "rabbit",
+      "position": "(-70.15867, -34.0055)",
+      "related_id": 1,
+      "time": 36.1000000000002,
+      "type": "first_meal"
+    },
+    {
+      "cause": "",
+      "description": "Fern is growing old",
+      "detail": "The clock badge marks an elder nearing the end of a natural lifespan. Food cannot stop aging; support the next generation.",
+      "entity_id": 6,
+      "kind": "rabbit",
+      "position": "(-44.57969, 6.852862)",
+      "related_id": -1,
+      "time": 132.099999999997,
+      "type": "elder"
+    },
+    {
+      "cause": "",
+      "description": "Sorrel is growing old",
+      "detail": "The clock badge marks an elder nearing the end of a natural lifespan. Food cannot stop aging; support the next generation.",
+      "entity_id": 8,
+      "kind": "rabbit",
+      "position": "(-42.79737, 101.8184)",
+      "related_id": -1,
+      "time": 142.899999999996,
+      "type": "elder"
+    },
+    {
+      "cause": "",
+      "description": "Pebble is growing old",
+      "detail": "The clock badge marks an elder nearing the end of a natural lifespan. Food cannot stop aging; support the next generation.",
+      "entity_id": 7,
+      "kind": "rabbit",
+      "position": "(21.74477, 4.668257)",
+      "related_id": -1,
+      "time": 154.899999999995,
+      "type": "elder"
+    },
+    {
+      "cause": "age",
+      "description": "Fern died of old age",
+      "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+      "entity_id": 6,
+      "kind": "rabbit",
+      "position": "(-37.96353, 1.434345)",
+      "related_id": -1,
+      "time": 174.899999999994,
+      "type": "death"
+    },
+    {
+      "cause": "",
+      "description": "Clover II was born to Pebble & Sorrel",
+      "detail": "",
+      "entity_id": 13,
+      "kind": "rabbit",
+      "position": "(-11.75825, 34.45131)",
+      "related_id": -1,
+      "time": 174.999999999994,
+      "type": "birth"
+    },
+    {
+      "cause": "",
+      "description": "Bramble is growing old",
+      "detail": "The clock badge marks an elder nearing the end of a natural lifespan. Food cannot stop aging; support the next generation.",
+      "entity_id": 9,
+      "kind": "rabbit",
+      "position": "(41.17464, 12.47746)",
+      "related_id": -1,
+      "time": 175.899999999994,
+      "type": "elder"
+    },
+    {
+      "cause": "",
+      "description": "Clover II found a first meal",
+      "detail": "",
+      "entity_id": 13,
+      "kind": "rabbit",
+      "position": "(-7.440423, 27.14038)",
+      "related_id": 4,
+      "time": 177.999999999994,
+      "type": "first_meal"
+    },
+    {
+      "cause": "age",
+      "description": "Sorrel died of old age",
+      "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+      "entity_id": 8,
+      "kind": "rabbit",
+      "position": "(-45.44349, 65.97074)",
+      "related_id": -1,
+      "time": 187.499999999994,
+      "type": "death"
+    },
+    {
+      "cause": "",
+      "description": "Pip II was born to Bramble & Juniper",
+      "detail": "",
+      "entity_id": 14,
+      "kind": "rabbit",
+      "position": "(-6.098155, 3.978278)",
+      "related_id": -1,
+      "time": 188.199999999994,
+      "type": "birth"
+    },
+    {
+      "cause": "",
+      "description": "Pip II found a first meal",
+      "detail": "",
+      "entity_id": 14,
+      "kind": "rabbit",
+      "position": "(-11.67418, -61.74145)",
+      "related_id": 2,
+      "time": 191.299999999993,
+      "type": "first_meal"
+    },
+    {
+      "cause": "age",
+      "description": "Pebble died of old age",
+      "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+      "entity_id": 7,
+      "kind": "rabbit",
+      "position": "(18.3398, 43.72878)",
+      "related_id": -1,
+      "time": 204.499999999993,
+      "type": "death"
+    },
+    {
+      "cause": "",
+      "description": "Hazel II was born to Thistle & Clover II",
+      "detail": "",
+      "entity_id": 15,
+      "kind": "rabbit",
+      "position": "(28.88098, -6.702604)",
+      "related_id": -1,
+      "time": 205.799999999993,
+      "type": "birth"
+    },
+    {
+      "cause": "",
+      "description": "Hazel II found a first meal",
+      "detail": "",
+      "entity_id": 15,
+      "kind": "rabbit",
+      "position": "(31.78824, -51.74786)",
+      "related_id": 3,
+      "time": 207.999999999992,
+      "type": "first_meal"
+    },
+    {
+      "cause": "age",
+      "description": "Bramble died of old age",
+      "detail": "Reached the end of a natural lifespan. Food cannot prevent old age; support a new generation.",
+      "entity_id": 9,
+      "kind": "rabbit",
+      "position": "(21.64544, 3.897434)",
+      "related_id": -1,
+      "time": 230.499999999991,
+      "type": "death"
+    },
+    {
+      "cause": "",
+      "description": "Moss II was born to Juniper & Hazel II",
+      "detail": "",
+      "entity_id": 16,
+      "kind": "rabbit",
+      "position": "(-15.50832, 23.16101)",
+      "related_id": -1,
+      "time": 231.099999999991,
+      "type": "birth"
+    },
+    {
+      "cause": "",
+      "description": "Moss II found a first meal",
+      "detail": "",
+      "entity_id": 16,
+      "kind": "rabbit",
+      "position": "(-19.06768, 44.05888)",
+      "related_id": 4,
+      "time": 231.899999999991,
+      "type": "first_meal"
+    },
+    {
+      "cause": "",
+      "description": "Juniper is growing old",
+      "detail": "The clock badge marks an elder nearing the end of a natural lifespan. Food cannot stop aging; support the next generation.",
+      "entity_id": 11,
+      "kind": "rabbit",
+      "position": "(-52.9142, 21.49893)",
+      "related_id": -1,
+      "time": 233.499999999991,
+      "type": "elder"
+    },
+    {
+      "cause": "",
+      "description": "Thistle is growing old",
+      "detail": "The clock badge marks an elder nearing the end of a natural lifespan. Food cannot stop aging; support the next generation.",
+      "entity_id": 12,
+      "kind": "rabbit",
+      "position": "(-12.78734, -1.328817)",
+      "related_id": -1,
+      "time": 234.699999999991,
+      "type": "elder"
+    }
+  ],
+  "supplies_claimed_without_placement": 3
+}

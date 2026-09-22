@@ -1,0 +1,48 @@
+Input #0, png_pipe, from '/private/tmp/biome-art-motion-2026-09-22/paused-fox-252.png':
+  Duration: N/A, bitrate: N/A
+  Stream #0:0: Video: png, rgba(pc, gbr/bt709/iec61966-2-1), 1280x800, 25 fps, 25 tbr, 25 tbn
+Input #1, png_pipe, from '/private/tmp/biome-art-motion-2026-09-22/paused-fox-282.png':
+  Duration: N/A, bitrate: N/A
+  Stream #1:0: Video: png, rgba(pc, gbr/bt709/iec61966-2-1), 1280x800, 25 fps, 25 tbr, 25 tbn
+Stream mapping:
+  Stream #0:0 (png) -> crop:default
+  Stream #1:0 (png) -> crop:default
+  metadata:default -> Stream #0:0 (wrapped_avframe)
+Press [q] to stop, [?] for help
+[Parsed_metadata_4 @ 0x9d680cfc0] frame:0    pts:0       pts_time:0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.YMIN=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.YLOW=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.YAVG=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.YHIGH=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.YMAX=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.UMIN=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.ULOW=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.UAVG=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.UHIGH=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.UMAX=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.VMIN=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.VLOW=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.VAVG=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.VHIGH=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.VMAX=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.SATMIN=181
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.SATLOW=181
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.SATAVG=181
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.SATHIGH=181
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.SATMAX=181
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.HUEMED=45
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.HUEAVG=45
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.YDIF=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.UDIF=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.VDIF=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.YBITDEPTH=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.UBITDEPTH=0
+[Parsed_metadata_4 @ 0x9d680cfc0] lavfi.signalstats.VBITDEPTH=0
+Output #0, null, to 'pipe:':
+  Metadata:
+    encoder         : Lavf62.12.102
+  Stream #0:0: Video: wrapped_avframe, yuv444p(unknown/bt709/iec61966-2-1, progressive), 104x96, q=2-31, 200 kb/s, 25 fps, 25 tbn
+    Metadata:
+      encoder         : Lavc62.28.102 wrapped_avframe
+[out#0/null @ 0x9d680c480] video:0KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=    1 fps=0.9 q=-0.0 Lsize=N/A time=00:00:00.04 bitrate=N/A speed=0.0342x elapsed=0:00:01.16    

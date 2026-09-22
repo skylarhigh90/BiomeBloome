@@ -280,6 +280,11 @@ func route_distance(start: Vector2, target: Vector2, world_radius: float, maximu
 	return float(route_between(start, target, world_radius, maximum_distance)["distance"])
 
 func direct_path_clear(start: Vector2, target: Vector2) -> bool:
+	# This predicate checks water only; route_between checks the endpoints and
+	# world boundary separately. With no stream, every intermediate water sample
+	# would be zero, so avoid sampling empty terrain for every candidate route.
+	if stream_points.size() < 2:
+		return true
 	var distance := start.distance_to(target)
 	if distance <= 0.001:
 		return not is_deep_water(start)

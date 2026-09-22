@@ -2,6 +2,8 @@ class_name EcosystemSimulation
 extends RefCounted
 
 const FOX_WOODLAND_ROUTE_BASE := -2000000
+const RABBIT_HOME_ROUTE_BASE := -3000000
+const MotionPresentation = preload("res://rendering/animal_motion.gd")
 
 const PLANT_ABUNDANT := "abundant"
 const PLANT_HEALTHY := "healthy"
@@ -15,6 +17,12 @@ signal plant_eaten(plant_id: int, position: Vector2)
 signal plant_state_changed(plant_id: int, previous_state: String, new_state: String, position: Vector2)
 signal creature_fed(kind: String, entity_id: int, food_id: int)
 signal predation_succeeded(fox_id: int, rabbit_id: int, position: Vector2)
+signal animal_story(kind: String, entity_id: int, event_type: String, related_id: int, position: Vector2)
+signal animal_died(snapshot: Dictionary)
+signal plant_transplanted(plant_id: int, previous_position: Vector2, new_position: Vector2)
+
+const RABBIT_NAMES := ["Clover", "Pip", "Hazel", "Moss", "Dandelion", "Fern", "Pebble", "Sorrel", "Bramble", "Mallow", "Juniper", "Thistle"]
+const FOX_NAMES := ["Ember", "Rowan", "Russet", "Copper", "Saffron", "Maple", "Flint", "Aster"]
 
 var config: Dictionary
 var rng := RandomNumberGenerator.new()
@@ -34,6 +42,8 @@ var rabbit_shared_food_vision: Dictionary = {}
 var rabbit_social_groups: Dictionary = {}
 var fox_prey_target_claims: Dictionary = {}
 var reproduction_check_timer := 0.0
+var animal_deaths: Dictionary = {}
+const DEATH_HISTORY_LIMIT := 128
 
 func _init(p_config: Dictionary = {}, p_seed: int = -1) -> void:
 	config = p_config if not p_config.is_empty() else GameConfig.make()
@@ -54,6 +64,7 @@ func reset() -> void:
 	rabbit_shared_food_vision.clear()
 	rabbit_social_groups.clear()
 	fox_prey_target_claims.clear()
+	animal_deaths.clear()
 	reproduction_check_timer = 0.0
 	spatial.clear()
 	next_entity_id = 1
@@ -73,12 +84,13 @@ func is_position_valid(position: Vector2) -> bool:
 func terrain_forestness(position: Vector2) -> float:
 	return terrain.woodland_cover(position)
 
-func add_rabbit(position: Vector2, reason: String = "placement") -> int:
+func add_rabbit(position: Vector2, reason: String = "placement", parent_ids: Array = []) -> int:
 	var cfg: Dictionary = config["rabbit"]
 	var entity_id := _take_id()
 	var direction := Vector2.from_angle(rng.randf_range(0.0, TAU))
 	var velocity: Vector2 = direction * cfg["move_speed"] * 0.35
 	var state_jitter := rng.randf_range(-1.0, 1.0) if reason == "birth" else 0.0
+	var initial_home := _rabbit_initial_home(position, reason, parent_ids)
 	rabbits[entity_id] = {
 		"id": entity_id,
 		"type": "rabbit",
@@ -86,12 +98,26 @@ func add_rabbit(position: Vector2, reason: String = "placement") -> int:
 		"previous_position": position,
 		"velocity": velocity,
 		"previous_velocity": velocity,
+		"motion_velocity": velocity,
+		"facing": direction.angle(),
+		"previous_facing": direction.angle(),
+		"gait_phase": 0.0,
+		"previous_gait_phase": 0.0,
+		"feeding_position": Vector2.INF,
+		"feeding_plant_position": Vector2.INF,
+		"feeding_bout_active": false,
+		"rest_timer": 0.0,
+		"shift_timer": 0.0,
 		"age": 0.0 if reason == "birth" else rng.randf_range(cfg["adult_age"], cfg["adult_age"] + 12.0),
 		"hunger": 17.0 + state_jitter * 1.5 if reason == "birth" else rng.randf_range(9.0, 22.0),
 		"food_motivated": false,
 		"food_memory": {},
 		"forage_failure_time": 0.0,
 		"last_fed_position": Vector2.INF,
+		"home_position": initial_home.get("position", Vector2.INF),
+		"home_food_id": int(initial_home.get("food_id", -1)),
+		"home_hungry_time": 0.0,
+		"home_established_at": simulation_time if not initial_home.is_empty() else -1.0,
 		"behavior": "wander",
 		"target_id": -1,
 		"reproduction_cooldown": cfg["newborn_cooldown"] + state_jitter * 1.2 if reason == "birth" else rng.randf_range(2.0, 8.0),
@@ -123,11 +149,53 @@ func add_rabbit(position: Vector2, reason: String = "placement") -> int:
 		"lifespan": cfg["lifespan"] * rng.randf_range(0.86, 1.16),
 		"created_at": simulation_time,
 		"reason": reason,
+		"name": _animal_name("rabbit", entity_id),
+		"parent_ids": parent_ids.duplicate(),
+		"offspring_ids": [],
+		"meals": 0,
+		"hunts": 0,
+		"recent_event": "Born in the meadow" if reason == "birth" else "Joined the meadow",
+		"recent_event_time": simulation_time,
 	}
+	_register_offspring("rabbit", entity_id, parent_ids)
 	entity_added.emit("rabbit", entity_id, reason)
+	animal_story.emit("rabbit", entity_id, "birth" if reason == "birth" else "arrival", -1, position)
 	return entity_id
 
-func add_fox(position: Vector2, reason: String = "placement") -> int:
+func _rabbit_initial_home(position: Vector2, reason: String, parent_ids: Array) -> Dictionary:
+	for parent_id in parent_ids:
+		if not rabbits.has(parent_id):
+			continue
+		var parent: Dictionary = rabbits[parent_id]
+		var home_position: Vector2 = parent.get("home_position", Vector2.INF)
+		if home_position != Vector2.INF and is_position_valid(home_position):
+			return {"position": home_position, "food_id": int(parent.get("home_food_id", -1))}
+	if reason != "placement":
+		return {}
+	var join_radius := float(config["rabbit"]["home_join_radius"])
+	var best: Dictionary = {}
+	var best_distance := INF
+	# Placement beside an existing colony or forage site is an intentional nudge
+	# from the player. Let the Rabbit settle before its initial hunger roll can
+	# send it wandering away from that readable choice.
+	for other in rabbits.values():
+		var other_home: Vector2 = other.get("home_position", Vector2.INF)
+		if other_home == Vector2.INF:
+			continue
+		var route := ground_route(position, other_home, join_radius)
+		if bool(route["reachable"]) and float(route["distance"]) < best_distance:
+			best_distance = float(route["distance"])
+			best = {"position": other_home, "food_id": int(other.get("home_food_id", -1))}
+	for plant in plants.values():
+		if not plant_is_food_available(plant):
+			continue
+		var route := ground_route(position, plant["position"], join_radius)
+		if bool(route["reachable"]) and float(route["distance"]) < best_distance:
+			best_distance = float(route["distance"])
+			best = {"position": plant["position"], "food_id": int(plant["id"])}
+	return best
+
+func add_fox(position: Vector2, reason: String = "placement", parent_ids: Array = []) -> int:
 	var cfg: Dictionary = config["fox"]
 	var entity_id := _take_id()
 	var direction := Vector2.from_angle(rng.randf_range(0.0, TAU))
@@ -139,6 +207,11 @@ func add_fox(position: Vector2, reason: String = "placement") -> int:
 		"previous_position": position,
 		"velocity": velocity,
 		"previous_velocity": velocity,
+		"facing": direction.angle(),
+		"previous_facing": direction.angle(),
+		"gait_phase": 0.0,
+		"previous_gait_phase": 0.0,
+		"last_capture_time": -INF,
 		"age": 0.0 if reason == "birth" else rng.randf_range(cfg["adult_age"], cfg["adult_age"] + 20.0),
 		"hunger": 16.0 if reason == "birth" else rng.randf_range(maxf(0.0, float(cfg["hunt_at"]) - 2.0), float(cfg["hunt_at"]) + 8.0),
 		"behavior": "wander",
@@ -169,8 +242,17 @@ func add_fox(position: Vector2, reason: String = "placement") -> int:
 		"lifespan": cfg["lifespan"] * rng.randf_range(0.88, 1.14),
 		"created_at": simulation_time,
 		"reason": reason,
+		"name": _animal_name("fox", entity_id),
+		"parent_ids": parent_ids.duplicate(),
+		"offspring_ids": [],
+		"meals": 0,
+		"hunts": 0,
+		"recent_event": "Born in the meadow" if reason == "birth" else "Entered the meadow",
+		"recent_event_time": simulation_time,
 	}
+	_register_offspring("fox", entity_id, parent_ids)
 	entity_added.emit("fox", entity_id, reason)
+	animal_story.emit("fox", entity_id, "birth" if reason == "birth" else "arrival", -1, position)
 	return entity_id
 
 func add_plant(plant_type: String, position: Vector2, reason: String = "placement") -> int:
@@ -201,6 +283,64 @@ func add_plant(plant_type: String, position: Vector2, reason: String = "placemen
 	}
 	entity_added.emit(plant_type, entity_id, reason)
 	return entity_id
+
+func remove_plant(entity_id: int, cause: String = "undo") -> bool:
+	if not plants.has(entity_id):
+		return false
+	var plant: Dictionary = plants[entity_id]
+	plants.erase(entity_id)
+	entity_removed.emit(str(plant["type"]), entity_id, plant["position"], cause)
+	rebuild_spatial_index()
+	return true
+
+func can_transplant_plant(entity_id: int, position: Vector2) -> bool:
+	if not plants.has(entity_id) or not is_position_valid(position):
+		return false
+	for other_id in plants:
+		if int(other_id) != entity_id and position.distance_to(plants[other_id]["position"]) < 15.0:
+			return false
+	return true
+
+func transplant_plant(entity_id: int, position: Vector2, retained_biomass: float = 0.65) -> bool:
+	if not can_transplant_plant(entity_id, position):
+		return false
+	var plant: Dictionary = plants[entity_id]
+	var previous: Vector2 = plant["position"]
+	var plant_type := str(plant["type"])
+	var previous_food := float(plant["food"])
+	var capacity_factor := terrain.food_capacity_factor(plant_type, position)
+	plant["position"] = position
+	plant["habitat_suitability"] = terrain.food_suitability(plant_type, position)
+	plant["habitat_capacity_factor"] = capacity_factor
+	plant["max_food"] = float(plant["base_max_food"]) * capacity_factor
+	plant["food"] = minf(float(plant["max_food"]), previous_food * clampf(retained_biomass, 0.0, 1.0))
+	plant["state_changed_at"] = simulation_time
+	_update_plant_ecology_state(plant)
+	rebuild_spatial_index()
+	plant_transplanted.emit(entity_id, previous, position)
+	return true
+
+func _animal_name(kind: String, entity_id: int) -> String:
+	var names: Array = RABBIT_NAMES if kind == "rabbit" else FOX_NAMES
+	var base := str(names[(entity_id - 1) % names.size()])
+	var generation := floori(float(entity_id - 1) / float(names.size()))
+	return base if generation == 0 else "%s %s" % [base, _roman_suffix(generation + 1)]
+
+func _roman_suffix(value: int) -> String:
+	return {2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII"}.get(value, str(value))
+
+func _register_offspring(kind: String, child_id: int, parent_ids: Array) -> void:
+	var source: Dictionary = rabbits if kind == "rabbit" else foxes
+	for parent_id in parent_ids:
+		if source.has(parent_id):
+			var offspring: Array = source[parent_id].get("offspring_ids", [])
+			offspring.append(child_id)
+			source[parent_id]["offspring_ids"] = offspring
+			_set_animal_event(source[parent_id], "Raised new young")
+
+func _set_animal_event(entity: Dictionary, description: String) -> void:
+	entity["recent_event"] = description
+	entity["recent_event_time"] = simulation_time
 
 func _take_id() -> int:
 	var result := next_entity_id
@@ -258,7 +398,10 @@ func kill_rabbit(entity_id: int, cause: String = "predation") -> bool:
 	if not rabbits.has(entity_id):
 		return false
 	var position: Vector2 = rabbits[entity_id]["position"]
+	var death := _record_animal_death("rabbit", entity_id, cause)
 	rabbits.erase(entity_id)
+	if not death.is_empty():
+		animal_died.emit(death)
 	entity_removed.emit("rabbit", entity_id, position, cause)
 	return true
 
@@ -266,9 +409,29 @@ func kill_fox(entity_id: int, cause: String = "starvation") -> bool:
 	if not foxes.has(entity_id):
 		return false
 	var position: Vector2 = foxes[entity_id]["position"]
+	var death := _record_animal_death("fox", entity_id, cause)
 	foxes.erase(entity_id)
+	if not death.is_empty():
+		animal_died.emit(death)
 	entity_removed.emit("fox", entity_id, position, cause)
 	return true
+
+func _record_animal_death(kind: String, entity_id: int, cause: String) -> Dictionary:
+	# Undo and debug removals are not deaths in the meadow's history.
+	if cause not in ["age", "starvation", "predation"]:
+		return {}
+	var snapshot := animal_snapshot(kind, entity_id, false)
+	snapshot["cause"] = cause
+	snapshot["cause_label"] = {"age": "old age", "starvation": "starvation", "predation": "a fox hunt"}[cause]
+	snapshot["time"] = simulation_time
+	snapshot["alive"] = false
+	animal_deaths["%s:%d" % [kind, entity_id]] = snapshot.duplicate(true)
+	while animal_deaths.size() > DEATH_HISTORY_LIMIT:
+		animal_deaths.erase(animal_deaths.keys()[0])
+	return snapshot
+
+func death_snapshot(kind: String, entity_id: int) -> Dictionary:
+	return Dictionary(animal_deaths.get("%s:%d" % [kind, entity_id], {})).duplicate(true)
 
 func expand_world(amount: float) -> bool:
 	var maximum: float = config["world"]["maximum_radius"]
@@ -338,8 +501,11 @@ func _regenerate_plants(delta: float) -> void:
 		# Direct test/debug state changes and future loading can put biomass below
 		# the threshold without passing through _consume_plant.
 		_update_plant_ecology_state(plant)
-		var suitability: float = plant.get("habitat_suitability", terrain.food_suitability(plant["type"], plant["position"]))
-		plant["habitat_suitability"] = suitability
+		# Dictionary.get evaluates its fallback eagerly. Recomputing unchanged
+		# terrain suitability for every patch every tick dominated plant updates.
+		if not plant.has("habitat_suitability"):
+			plant["habitat_suitability"] = terrain.food_suitability(plant["type"], plant["position"])
+		var suitability: float = plant["habitat_suitability"]
 		plant["food"] = minf(plant["max_food"], plant["food"] + plant["regeneration"] * suitability * delta)
 		_update_plant_ecology_state(plant)
 
@@ -459,8 +625,11 @@ func _rebuild_fox_prey_target_claims() -> void:
 
 func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 	var cfg: Dictionary = config["rabbit"]
+	MotionPresentation.begin_step(rabbit, simulation_time - delta, delta)
 	rabbit["previous_position"] = rabbit["position"]
 	rabbit["previous_velocity"] = rabbit["velocity"]
+	rabbit["previous_facing"] = rabbit.get("facing", Vector2(rabbit["velocity"]).angle())
+	rabbit["previous_gait_phase"] = rabbit.get("gait_phase", 0.0)
 	rabbit["age"] += delta
 	rabbit["hunger"] += cfg["hunger_rate"] * delta
 	rabbit["recent_food"] = maxf(0.0, rabbit["recent_food"] - cfg["recent_food_decay"] * delta)
@@ -501,6 +670,7 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 			)
 			should_flee = not prepared_refuge.is_empty()
 	if should_flee:
+		rabbit["rest_timer"] = 0.0
 		rabbit["behavior"] = "flee"
 		var active_flee_speed := float(cfg["flee_speed"])
 		if float(rabbit.get("flee_stamina", 0.0)) > 0.0:
@@ -549,6 +719,8 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 			rabbit["decision_timer"] = 0.0
 			rabbit["refuge_position"] = Vector2.INF
 			_clear_ground_route(rabbit)
+			if _rabbit_has_home(rabbit):
+				rabbit["behavior"] = "return_home"
 		var hungry_at: float = cfg["hungry_at"] + rabbit["hunger_threshold_offset"]
 		if rabbit["food_motivated"]:
 			if rabbit["hunger"] <= cfg["sated_at"]:
@@ -557,6 +729,11 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 			if rabbit["hunger"] >= hungry_at:
 				rabbit["food_motivated"] = true
 		var hungry: bool = rabbit["food_motivated"]
+		if _rabbit_has_home(rabbit):
+			if hungry:
+				rabbit["home_hungry_time"] = float(rabbit.get("home_hungry_time", 0.0)) + delta
+		else:
+			rabbit["home_hungry_time"] = 0.0
 		var target_valid := _rabbit_food_target_is_valid(rabbit)
 		if hungry and not target_valid:
 			rabbit["forage_failure_time"] = float(rabbit.get("forage_failure_time", 0.0)) + delta
@@ -565,8 +742,8 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 		else:
 			rabbit["forage_failure_time"] = 0.0
 		var needs_decision: bool = rabbit["decision_timer"] <= 0.0
-		needs_decision = needs_decision or (hungry and rabbit["behavior"] in ["wander", "forage"] and not target_valid)
-		needs_decision = needs_decision or (not hungry and rabbit["behavior"] != "wander")
+		needs_decision = needs_decision or (hungry and rabbit["behavior"] in ["wander", "forage", "loaf", "socialize", "return_home"] and not target_valid)
+		needs_decision = needs_decision or (not hungry and rabbit["behavior"] not in ["wander", "loaf", "socialize", "return_home"])
 		needs_decision = needs_decision or (rabbit["behavior"] in ["seek_food", "eat"] and not target_valid)
 		if needs_decision:
 			rabbit["decision_timer"] = rabbit["decision_interval"]
@@ -588,30 +765,93 @@ func _update_rabbit(rabbit: Dictionary, delta: float) -> bool:
 						_set_rabbit_target(rabbit, -1)
 						_clear_ground_route(rabbit)
 			else:
-				rabbit["behavior"] = "wander"
 				_set_rabbit_target(rabbit, -1)
 				_clear_ground_route(rabbit)
 		target_valid = hungry and _rabbit_food_target_is_valid(rabbit)
 		if target_valid:
 			var food: Dictionary = plants[rabbit["target_id"]]
 			rabbit["behavior"] = "seek_food"
-			desired = _velocity_along_route(rabbit, food["position"], food["id"], cfg["move_speed"] * rabbit["speed_scale"], false)
-			if position.distance_to(food["position"]) <= cfg["eat_distance"]:
+			var feeding_position := _rabbit_feeding_position(rabbit, food)
+			var distance := position.distance_to(feeding_position)
+			var approach_speed: float = minf(cfg["move_speed"] * rabbit["speed_scale"], distance * 3.0)
+			desired = _velocity_along_route(rabbit, feeding_position, food["id"], approach_speed, false)
+			if distance <= float(cfg["feeding_arrival_distance"]):
 				_consume_plant(rabbit, food, delta)
-		else:
-			rabbit["behavior"] = "forage" if hungry else "wander"
+				rabbit["facing"] = lerp_angle(float(rabbit["facing"]), position.direction_to(food["position"]).angle(), 1.0 - exp(-8.0 * delta))
+		elif hungry:
+			rabbit["behavior"] = "forage"
 			_set_rabbit_target(rabbit, -1)
 			_clear_ground_route(rabbit)
 			desired = _rabbit_wander_velocity(rabbit, cfg["move_speed"], delta)
-	var separation_scale: float = 0.24 if rabbit["behavior"] == "flee" else cfg["separation_strength"]
+		else:
+			_set_rabbit_target(rabbit, -1)
+			if _rabbit_has_home(rabbit):
+				desired = _rabbit_home_velocity(rabbit, cfg["move_speed"], delta)
+			else:
+				rabbit["behavior"] = "wander"
+				_clear_ground_route(rabbit)
+				desired = _rabbit_wander_velocity(rabbit, cfg["move_speed"], delta)
+	# Activities own their motor. No ambient steering may move a planted animal.
+	if rabbit["behavior"] in ["eat", "loaf", "socialize", "observe"]:
+		rabbit["velocity"] = Vector2.ZERO
+		rabbit["motion_velocity"] = Vector2.ZERO
+		MotionPresentation.finish_step(rabbit, delta)
+		return _update_mortality(rabbit, cfg, delta)
+	var separation_scale: float = cfg["separation_strength"]
+	if rabbit["behavior"] == "flee":
+		separation_scale = 0.24
+	elif rabbit["behavior"] in ["loaf", "socialize"]:
+		separation_scale = 0.18
+	elif rabbit["behavior"] == "return_home":
+		separation_scale = 0.32
 	desired += _rabbit_separation(rabbit) * cfg["move_speed"] * separation_scale
 	# Target routes should visually win over ambient habitat preference. Otherwise
 	# the weak Meadow bias can push a Rabbit back into a bank while it is trying
 	# to line up with a ford.
-	var habitat_strength: float = 0.06 if rabbit["behavior"] in ["flee", "seek_food", "eat", "forage"] else 0.32 * rabbit["habitat_bias"]
+	var habitat_strength: float = 0.06 if rabbit["behavior"] in ["flee", "seek_food", "eat", "forage", "return_home", "loaf", "socialize"] else 0.32 * rabbit["habitat_bias"]
 	desired += _habitat_steering(position, false, rabbit["habitat_phase"]) * cfg["move_speed"] * habitat_strength
+	if rabbit["behavior"] in ["loaf", "socialize"]:
+		var home_pace := float(cfg["home_mating_speed_factor"]) if rabbit["behavior"] == "socialize" else float(cfg["home_loaf_speed_factor"])
+		desired = desired.limit_length(float(cfg["move_speed"]) * home_pace)
 	_move_entity(rabbit, desired, cfg["steering"] * rabbit["turn_scale"], delta)
+	if Vector2(rabbit["velocity"]).length_squared() > 1.0:
+		rabbit["facing"] = lerp_angle(float(rabbit["facing"]), Vector2(rabbit["velocity"]).angle(), 1.0 - exp(-10.0 * delta))
+	MotionPresentation.finish_step(rabbit, delta)
 	return _update_mortality(rabbit, cfg, delta)
+
+func _rabbit_feeding_position(rabbit: Dictionary, plant: Dictionary) -> Vector2:
+	var retained: Vector2 = rabbit.get("feeding_position", Vector2.INF)
+	if retained != Vector2.INF and rabbit.get("feeding_plant_position", Vector2.INF) == plant["position"]:
+		return retained
+	var best: Vector2 = plant["position"]
+	var best_score := INF
+	var radius := float(config["rabbit"]["feeding_site_radius"])
+	# A rabbit already beside food can plant its feet where it stands if that
+	# spot is free. It need not walk away before taking a life-saving first bite.
+	if Vector2(rabbit["position"]).distance_to(plant["position"]) <= float(config["rabbit"]["eat_distance"]) and _rabbit_separation(rabbit).length() < 0.16:
+		best = rabbit["position"]
+		best_score = 0.0
+	for index in range(6):
+		if best_score <= 0.0:
+			break
+		var candidate: Vector2 = plant["position"] + Vector2.from_angle(float(index) * TAU / 6.0) * radius
+		if not is_position_valid(candidate) or not positions_ground_reachable(plant["position"], candidate, radius * 1.5):
+			continue
+		var score: float = Vector2(rabbit["position"]).distance_to(candidate)
+		for entry in query_nearby("rabbit", candidate, 60.0):
+			if entry["id"] == rabbit["id"] or not rabbits.has(entry["id"]):
+				continue
+			var other: Dictionary = rabbits[entry["id"]]
+			var occupied: Vector2 = other.get("feeding_position", Vector2.INF)
+			if occupied == Vector2.INF: occupied = other["position"]
+			score += maxf(0.0, 28.0 - candidate.distance_to(occupied)) * 8.0
+		if score < best_score:
+			best_score = score
+			best = candidate
+	rabbit["feeding_position"] = best
+	rabbit["feeding_plant_position"] = plant["position"]
+	_set_ground_route(rabbit, best, plant["id"])
+	return best
 
 func _rabbit_refuge_evasion_velocity(rabbit: Dictionary, threat_position: Vector2, speed: float) -> Vector2:
 	var position: Vector2 = rabbit["position"]
@@ -639,8 +879,11 @@ func _rabbit_refuge_evasion_velocity(rabbit: Dictionary, threat_position: Vector
 
 func _update_fox(fox: Dictionary, delta: float) -> bool:
 	var cfg: Dictionary = config["fox"]
+	MotionPresentation.begin_step(fox, simulation_time - delta, delta)
 	fox["previous_position"] = fox["position"]
 	fox["previous_velocity"] = fox["velocity"]
+	fox["previous_facing"] = fox.get("facing", Vector2(fox["velocity"]).angle())
+	fox["previous_gait_phase"] = fox.get("gait_phase", 0.0)
 	fox["age"] += delta
 	fox["hunger"] += cfg["hunger_rate"] * delta
 	fox["recent_food"] = maxf(0.0, fox["recent_food"] - cfg["recent_food_decay"] * delta)
@@ -732,8 +975,13 @@ func _update_fox(fox: Dictionary, delta: float) -> bool:
 					fox["failed_pursuits"] = 0
 					fox["sprint_stamina"] = minf(stamina_capacity, float(fox["sprint_stamina"]) + float(cfg.get("meal_stamina_restore", 1.5)))
 					fox["is_sprinting"] = false
+					fox["meals"] = int(fox.get("meals", 0)) + 1
+					fox["hunts"] = int(fox.get("hunts", 0)) + 1
+					_set_animal_event(fox, "Completed a hunt")
+					fox["last_capture_time"] = simulation_time
 					creature_fed.emit("fox", fox["id"], prey_id)
 					predation_succeeded.emit(fox["id"], prey_id, prey_position)
+					animal_story.emit("fox", fox["id"], "hunt", prey_id, prey_position)
 					fox["capture_progress"] = 0.0
 				fox["hunt_time"] = 0.0
 				_set_fox_target(fox, -1)
@@ -754,6 +1002,7 @@ func _update_fox(fox: Dictionary, delta: float) -> bool:
 	var woodland_strength := float(config["terrain"].get("woodland", {}).get("fox_wander_steering_strength", 0.62))
 	desired += _habitat_steering(position, true) * cfg["move_speed"] * (0.06 if fox["behavior"] == "hunt" else woodland_strength)
 	_move_entity(fox, desired, cfg["steering"], delta)
+	MotionPresentation.finish_step(fox, delta)
 	return _update_mortality(fox, cfg, delta)
 
 func _fox_woodland_wander_velocity(fox: Dictionary, cfg: Dictionary, delta: float) -> Vector2:
@@ -812,6 +1061,61 @@ func _rabbit_wander_velocity(rabbit: Dictionary, speed: float, delta: float) -> 
 	var pace := 0.62 + sin(simulation_time * 0.7 + rabbit["id"] * 1.37) * 0.12
 	return direction * speed * rabbit["speed_scale"] * pace
 
+func _rabbit_has_home(rabbit: Dictionary) -> bool:
+	var home_position: Vector2 = rabbit.get("home_position", Vector2.INF)
+	return home_position != Vector2.INF and is_position_valid(home_position)
+
+func _rabbit_home_velocity(rabbit: Dictionary, speed: float, delta: float) -> Vector2:
+	var cfg: Dictionary = config["rabbit"]
+	var home_position: Vector2 = rabbit["home_position"]
+	var distance: float = Vector2(rabbit["position"]).distance_to(home_position)
+	var gathering: bool = _rabbit_is_eligible(rabbit)
+	var activity_radius: float = float(cfg["home_mating_radius"]) if gathering else float(cfg["home_loaf_radius"])
+	var pace_factor: float = float(cfg["home_mating_speed_factor"]) if gathering else float(cfg["home_loaf_speed_factor"])
+	var was_returning: bool = rabbit["behavior"] == "return_home"
+	if distance > float(cfg["home_return_radius"]) or ((was_returning or gathering) and distance > activity_radius):
+		rabbit["behavior"] = "return_home"
+		var route_id := RABBIT_HOME_ROUTE_BASE - int(rabbit["id"])
+		var routed := _velocity_along_route(
+			rabbit,
+			home_position,
+			route_id,
+			speed * float(cfg["home_return_speed_factor"]) * float(rabbit["speed_scale"]),
+			false,
+		)
+		if routed.length_squared() > 0.01:
+			return routed
+		return rabbit["position"].direction_to(home_position) * speed * float(cfg["home_return_speed_factor"])
+
+	if int(rabbit.get("route_target_id", -1)) == RABBIT_HOME_ROUTE_BASE - int(rabbit["id"]):
+		_clear_ground_route(rabbit)
+	var separation := _rabbit_separation(rabbit)
+	# A resting animal yields its space in one short shift, then plants again.
+	# Hunger and danger are evaluated before this action on every fixed step.
+	if separation.length() > 0.10:
+		rabbit["behavior"] = "shift"
+		rabbit["rest_timer"] = 0.0
+		return separation * speed * 0.65
+	if float(rabbit.get("shift_timer", 0.0)) > 0.0:
+		rabbit["shift_timer"] = maxf(0.0, float(rabbit["shift_timer"]) - delta)
+		rabbit["behavior"] = "shift"
+		return _rabbit_wander_velocity(rabbit, speed * pace_factor, delta)
+	if distance <= activity_radius + 18.0:
+		if float(rabbit.get("rest_timer", 0.0)) <= 0.0:
+			rabbit["rest_timer"] = float(cfg["rest_duration"]) + float(int(rabbit["id"]) % 4) * 0.5 + float(cfg["observe_duration"])
+		rabbit["rest_timer"] = maxf(0.0, float(rabbit["rest_timer"]) - delta)
+		rabbit["behavior"] = "observe" if float(rabbit["rest_timer"]) < float(cfg["observe_duration"]) else ("socialize" if gathering else "loaf")
+		if float(rabbit["rest_timer"]) <= 0.0:
+			rabbit["shift_timer"] = 1.2
+		return Vector2.ZERO
+	rabbit["behavior"] = "shift"
+	var local_wander: Vector2 = _rabbit_wander_velocity(rabbit, speed * pace_factor, delta)
+	if distance <= activity_radius:
+		return local_wander
+	var homeward: Vector2 = Vector2(rabbit["position"]).direction_to(home_position) * speed * pace_factor
+	var pull: float = clampf(inverse_lerp(activity_radius, float(cfg["home_return_radius"]), distance), 0.0, 1.0)
+	return local_wander.lerp(homeward, maxf(0.32, pull))
+
 func _habitat_steering(position: Vector2, prefers_forest: bool, sample_phase: float = 0.0) -> Vector2:
 	var sample_distance := 34.0
 	var steering := Vector2.ZERO
@@ -833,8 +1137,18 @@ func _move_entity(entity: Dictionary, desired: Vector2, steering: float, delta: 
 	if edge_distance > edge_radius - 42.0:
 		var edge_strength := clampf((edge_distance - (edge_radius - 42.0)) / 42.0, 0.0, 1.0)
 		desired = desired.lerp(-position.normalized() * maxf(desired.length(), 35.0), edge_strength)
-	var velocity: Vector2 = entity["velocity"]
+	var is_rabbit := str(entity["type"]) == "rabbit"
+	var velocity: Vector2 = entity.get("motion_velocity", entity["velocity"]) if is_rabbit else entity["velocity"]
 	velocity = velocity.lerp(desired, 1.0 - exp(-steering * delta))
+	if is_rabbit:
+		entity["motion_velocity"] = velocity
+		var pace := clampf(velocity.length() / maxf(1.0, float(config["rabbit"]["move_speed"])), 0.0, 1.7)
+		if pace > 0.04:
+			var phase: float = float(entity.get("gait_phase", 0.0)) + delta * float(config["rabbit"]["hop_frequency"]) * sqrt(pace)
+			entity["gait_phase"] = phase
+			# Forward impulse and rendered takeoff/landing share this fixed-step
+			# phase. Mean impulse is one; acceleration still belongs to the motor.
+			velocity *= 1.0 - cos(phase * TAU) * 0.72
 	var next_position := position + velocity * delta
 	if not is_inside_world(next_position):
 		velocity = velocity.bounce(position.normalized()).lerp(-position.normalized() * velocity.length(), 0.65)
@@ -902,6 +1216,9 @@ func _set_rabbit_target(rabbit: Dictionary, target_id: int) -> void:
 		else:
 			rabbit_food_target_claims.erase(previous_id)
 	rabbit["target_id"] = target_id
+	rabbit["feeding_position"] = Vector2.INF
+	rabbit["feeding_plant_position"] = Vector2.INF
+	rabbit["feeding_bout_active"] = false
 	if plants.has(target_id):
 		rabbit_food_target_claims[target_id] = int(rabbit_food_target_claims.get(target_id, 0)) + 1
 
@@ -1063,6 +1380,47 @@ func _best_food_target(rabbit: Dictionary, visible_food: Dictionary) -> Dictiona
 			best = {"id": plant["id"], "position": plant["position"], "route": route}
 	return best
 
+func _update_rabbit_home_after_meal(rabbit: Dictionary, plant: Dictionary) -> void:
+	var cfg: Dictionary = config["rabbit"]
+	if not _rabbit_has_home(rabbit):
+		_establish_rabbit_home(rabbit, plant)
+		return
+	var home_position: Vector2 = rabbit["home_position"]
+	var meal_distance := home_position.distance_to(plant["position"])
+	if meal_distance <= float(cfg["home_relocation_distance"]):
+		rabbit["home_hungry_time"] = 0.0
+		return
+	if float(rabbit.get("home_hungry_time", 0.0)) >= float(cfg["home_relocation_hungry_time"]):
+		_establish_rabbit_home(rabbit, plant)
+
+func _establish_rabbit_home(rabbit: Dictionary, plant: Dictionary) -> void:
+	var cfg: Dictionary = config["rabbit"]
+	var meal_position: Vector2 = plant["position"]
+	var home_position := meal_position
+	var home_food_id := int(plant["id"])
+	var best_distance := INF
+	var join_radius := float(cfg["home_join_radius"])
+	# Established homes act like local scent landmarks. A new diner joins a nearby
+	# colony, but distant colonies never exert a global flocking pull.
+	for other in rabbits.values():
+		if int(other["id"]) == int(rabbit["id"]):
+			continue
+		var other_home: Vector2 = other.get("home_position", Vector2.INF)
+		if other_home == Vector2.INF:
+			continue
+		var distance := meal_position.distance_to(other_home)
+		if distance >= best_distance or distance > join_radius:
+			continue
+		if ground_route_distance(meal_position, other_home, join_radius) > join_radius:
+			continue
+		best_distance = distance
+		home_position = other_home
+		home_food_id = int(other.get("home_food_id", plant["id"]))
+	rabbit["home_position"] = home_position
+	rabbit["home_food_id"] = home_food_id
+	rabbit["home_hungry_time"] = 0.0
+	rabbit["home_established_at"] = simulation_time
+
 
 func _consume_plant(rabbit: Dictionary, plant: Dictionary, delta: float) -> void:
 	var cfg: Dictionary = config["rabbit"]
@@ -1076,12 +1434,21 @@ func _consume_plant(rabbit: Dictionary, plant: Dictionary, delta: float) -> void
 	rabbit["starvation_time"] = maxf(0.0, float(rabbit["starvation_time"]) - amount * float(cfg.get("feeding_starvation_relief", 1.5)))
 	rabbit["forage_failure_time"] = 0.0
 	rabbit["last_fed_position"] = plant["position"]
+	_update_rabbit_home_after_meal(rabbit, plant)
 	var memory: Dictionary = rabbit.get("food_memory", {})
 	memory[plant["id"]] = simulation_time
 	rabbit["food_memory"] = memory
 	rabbit["behavior"] = "eat"
 	plant_eaten.emit(plant["id"], plant["position"])
 	creature_fed.emit("rabbit", rabbit["id"], plant["id"])
+	# A meal is one feeding visit, including an interrupted visit, never a tick.
+	if not bool(rabbit.get("feeding_bout_active", false)):
+		rabbit["feeding_bout_active"] = true
+		var first_meal := int(rabbit.get("meals", 0)) == 0
+		rabbit["meals"] = int(rabbit.get("meals", 0)) + 1
+		_set_animal_event(rabbit, "Found a first meal" if first_meal else "Ate nearby forage")
+		if first_meal:
+			animal_story.emit("rabbit", rabbit["id"], "first_meal", plant["id"], rabbit["position"])
 
 func _update_mortality(entity: Dictionary, cfg: Dictionary, delta: float) -> bool:
 	if entity["hunger"] >= cfg["starvation_threshold"]:
@@ -1096,6 +1463,7 @@ func _process_rabbit_reproduction() -> void:
 		return
 	var paired: Dictionary = {}
 	var births: Array[Vector2] = []
+	var birth_parents: Array[Array] = []
 	for entity_id in rabbits.keys():
 		if paired.has(entity_id) or not _rabbit_is_eligible(rabbits[entity_id]):
 			continue
@@ -1137,24 +1505,97 @@ func _process_rabbit_reproduction() -> void:
 			parent["recent_food"] = maxf(0.0, float(parent["recent_food"]) - energy_cost)
 			parent["hunger"] = minf(float(cfg["starvation_threshold"]), float(parent["hunger"]) + hunger_cost)
 		births.append_array(child_positions)
-	for position in births:
+		for _child_position in child_positions:
+			birth_parents.append([int(entity_id), int(mate_id)])
+	for birth_index in range(births.size()):
+		var position: Vector2 = births[birth_index]
 		if position != Vector2.INF:
-			add_rabbit(position, "birth")
+			add_rabbit(position, "birth", birth_parents[birth_index])
 			last_tick_stats["births"] += 1
 
 func _rabbit_is_eligible(rabbit: Dictionary) -> bool:
+	return _rabbit_readiness_code(rabbit).is_empty()
+
+func _rabbit_readiness_code(rabbit: Dictionary) -> String:
 	var cfg: Dictionary = config["rabbit"]
-	return rabbit["age"] >= cfg["adult_age"] \
-		and rabbit["hunger"] <= cfg["reproduction_hunger_max"] \
-		and rabbit["recent_food"] >= cfg["reproduction_food_needed"] \
-		and rabbit["reproduction_cooldown"] <= 0.0
+	if rabbit["age"] < cfg["adult_age"]:
+		return "young"
+	if rabbit["hunger"] > cfg["reproduction_hunger_max"]:
+		return "hungry"
+	if rabbit["reproduction_cooldown"] > 0.0:
+		return "recovering"
+	if rabbit["recent_food"] < cfg["reproduction_food_needed"]:
+		return "needs_meals"
+	return ""
+
+func rabbit_birth_status(entity_id: int) -> Dictionary:
+	if not rabbits.has(entity_id):
+		return _birth_status("missing", "Rabbit no longer here", "Select a living rabbit to see its family readiness.")
+	var cfg: Dictionary = config["rabbit"]
+	var rabbit: Dictionary = rabbits[entity_id]
+	if rabbits.size() >= int(cfg["max_population"]):
+		return _birth_status("population_limit", "Meadow population limit", "There is no room for more rabbits in this meadow.")
+	var code := _rabbit_readiness_code(rabbit)
+	match code:
+		"young":
+			return _birth_status(code, "Still growing", "Can become a parent in about %d meadow seconds, once fed and near another ready adult." % ceili(float(cfg["adult_age"]) - float(rabbit["age"])))
+		"hungry":
+			return _birth_status(code, "Needs to eat first", "A hungry rabbit cannot have young. Keep usable forage close to its home.")
+		"recovering":
+			return _birth_status(code, "Resting before young", "Family rest: %d meadow seconds left. Food and a ready companion are also needed." % ceili(float(rabbit["reproduction_cooldown"])))
+		"needs_meals":
+			var progress := clampi(floori(float(rabbit["recent_food"]) / maxf(0.001, float(cfg["reproduction_food_needed"])) * 100.0), 0, 99)
+			return _birth_status(code, "Building food reserves · %d%%" % progress, "Being comfortable is only the first step. Repeated meals build the reserves needed for young; reserves slowly fade between meals.")
+	# A private index includes placements made while paused, without touching the
+	# simulation's index, query counters, or random-number stream.
+	var read_index := SpatialHash.new(spatial.cell_size)
+	for id in rabbits:
+		read_index.insert("rabbit", id, rabbits[id]["position"])
+	for id in plants:
+		read_index.insert("plant", id, plants[id]["position"])
+	var mate_id := -1
+	var nearby_adult := false
+	for entry in read_index.query("rabbit", rabbit["position"], float(cfg["mating_radius"])):
+		if int(entry["id"]) == entity_id:
+			continue
+		var other: Dictionary = rabbits[entry["id"]]
+		if ground_route_distance(rabbit["position"], other["position"], float(cfg["mating_radius"])) > float(cfg["mating_radius"]):
+			continue
+		if float(other["age"]) >= float(cfg["adult_age"]):
+			nearby_adult = true
+		if _rabbit_is_eligible(other):
+			mate_id = int(entry["id"])
+			break
+	if mate_id == -1:
+		if nearby_adult:
+			return _birth_status("mate_not_ready", "Waiting for a ready companion", "A nearby adult still needs food or rest before the pair can have young. Inspect that rabbit for its next step.")
+		return _birth_status("needs_mate", "Needs a nearby adult", "Keep two well-fed adults together at the same home. They must be close enough to reach one another.")
+	var midpoint: Vector2 = (rabbit["position"] + rabbits[mate_id]["position"]) * 0.5
+	var pending: Array[Vector2] = []
+	code = _birth_forage_blocker(midpoint, int(cfg["birth_litter_min"]), pending, read_index)
+	match code:
+		"local_food":
+			return _birth_status(code, "More nearby food needed", "This pair needs a surplus of usable forage around its home before young can be born. Add a nearby patch or let depleted plants recover.")
+		"local_stock":
+			return _birth_status(code, "Nearby forage needs to recover", "Food reserves around this pair are too low for young. Give the plants time to regrow or add more nearby forage.")
+		"local_capacity":
+			return _birth_status(code, "More nearby forage needed", "Nearby plants cannot regrow enough food for another rabbit. Add productive forage at this home; waiting alone will not raise its capacity.")
+		"world_stock":
+			return _birth_status(code, "Meadow food needs to recover", "Food reserves across the meadow are too low for young. Let plants recover or add forage.")
+		"world_capacity":
+			return _birth_status(code, "Meadow needs more forage", "The meadow cannot regrow enough food for another rabbit yet. Add productive forage to support more young.")
+	return _birth_status("ready", "Ready with a nearby companion", "Both adults have food reserves and nearby forage can support young. They can have young at the next family check if these conditions hold.", true)
+
+func _birth_status(code: String, summary: String, detail: String, ready: bool = false) -> Dictionary:
+	return {"code": code, "summary": summary, "detail": detail, "ready": ready}
 
 func _process_fox_reproduction() -> void:
 	var cfg: Dictionary = config["fox"]
 	if foxes.size() >= int(cfg["max_population"]):
 		return
 	var paired: Dictionary = {}
-	var births: Array = []
+	var births: Array[Vector2] = []
+	var birth_parents: Array[Array] = []
 	for entity_id in foxes.keys():
 		if paired.has(entity_id) or not _fox_is_eligible(foxes[entity_id]):
 			continue
@@ -1187,9 +1628,11 @@ func _process_fox_reproduction() -> void:
 		fox["recent_food"] *= 0.25
 		foxes[mate_id]["recent_food"] *= 0.25
 		births.append(_nearby_valid_position(midpoint, 15.0))
-	for position in births:
+		birth_parents.append([int(entity_id), int(mate_id)])
+	for birth_index in range(births.size()):
+		var position: Vector2 = births[birth_index]
 		if position != Vector2.INF:
-			add_fox(position, "birth")
+			add_fox(position, "birth", birth_parents[birth_index])
 			last_tick_stats["births"] += 1
 
 func _fox_is_eligible(fox: Dictionary) -> bool:
@@ -1200,26 +1643,32 @@ func _fox_is_eligible(fox: Dictionary) -> bool:
 		and fox["reproduction_cooldown"] <= 0.0
 
 func _local_forage_can_support_births(position: Vector2, birth_count: int, pending_births: Array[Vector2]) -> bool:
+	return _birth_forage_blocker(position, birth_count, pending_births).is_empty()
+
+func _birth_forage_blocker(position: Vector2, birth_count: int, pending_births: Array[Vector2], read_index: SpatialHash = null) -> String:
 	var cfg: Dictionary = config["rabbit"]
 	var radius := float(cfg.get("reproduction_resource_radius", cfg["mating_radius"]))
-	var budget := local_forage_budget(position, radius)
+	var budget := local_forage_budget(position, radius, read_index)
 	if float(budget["available_food"]) < maxf(float(cfg["local_food_needed"]), float(cfg.get("reproduction_biomass_cost", 0.0)) * birth_count):
-		return false
+		return "local_food"
 	if float(budget["stock_ratio"]) < float(cfg.get("reproduction_min_stock_ratio", 0.0)):
-		return false
+		return "local_stock"
 	var pending_local := 0
 	for birth_position in pending_births:
 		if position.distance_to(birth_position) <= radius:
 			pending_local += 1
 	var projected_demand := int(budget["rabbit_count"]) + pending_local + birth_count
 	if projected_demand > int(floor(float(budget["sustainable_rabbits"]))):
-		return false
+		return "local_capacity"
 	# Local ranges overlap, so a colony split between two patches could otherwise
 	# count the same forage twice and still overshoot the meadow as a whole.
 	var ecosystem_budget := ecosystem_forage_budget()
 	var projected_population := rabbits.size() + pending_births.size() + birth_count
-	return float(ecosystem_budget["stock_ratio"]) >= float(cfg.get("reproduction_min_stock_ratio", 0.0)) \
-		and projected_population <= int(floor(float(ecosystem_budget["sustainable_rabbits"])))
+	if float(ecosystem_budget["stock_ratio"]) < float(cfg.get("reproduction_min_stock_ratio", 0.0)):
+		return "world_stock"
+	if projected_population > int(floor(float(ecosystem_budget["sustainable_rabbits"]))):
+		return "world_capacity"
+	return ""
 
 func ecosystem_forage_budget() -> Dictionary:
 	var total_food := 0.0
@@ -1241,12 +1690,13 @@ func ecosystem_forage_budget() -> Dictionary:
 		"rabbit_count": rabbits.size(),
 	}
 
-func local_forage_budget(position: Vector2, radius: float) -> Dictionary:
+func local_forage_budget(position: Vector2, radius: float, read_index: SpatialHash = null) -> Dictionary:
 	var available_food := 0.0
 	var total_food := 0.0
 	var total_capacity := 0.0
 	var renewable_biomass_per_second := 0.0
-	for entry in query_nearby("plant", position, radius):
+	var entries := query_nearby("plant", position, radius) if read_index == null else read_index.query("plant", position, radius)
+	for entry in entries:
 		if not plants.has(entry["id"]):
 			continue
 		var plant: Dictionary = plants[entry["id"]]
@@ -1257,7 +1707,7 @@ func local_forage_budget(position: Vector2, radius: float) -> Dictionary:
 		if plant_is_food_available(plant):
 			available_food += float(plant["food"])
 		renewable_biomass_per_second += float(plant["regeneration"]) * float(plant.get("habitat_suitability", 1.0))
-	var rabbit_count := _local_reachable_count("rabbit", position, radius)
+	var rabbit_count := _local_reachable_count("rabbit", position, radius, read_index)
 	var cfg: Dictionary = config["rabbit"]
 	var sustainable_rabbits := renewable_biomass_per_second * float(cfg["food_value"]) \
 		/ maxf(0.001, float(cfg["hunger_rate"])) * float(cfg.get("reproduction_capacity_utilization", 1.0))
@@ -1271,9 +1721,10 @@ func local_forage_budget(position: Vector2, radius: float) -> Dictionary:
 		"rabbit_count": rabbit_count,
 	}
 
-func _local_reachable_count(kind: String, position: Vector2, radius: float) -> int:
+func _local_reachable_count(kind: String, position: Vector2, radius: float, read_index: SpatialHash = null) -> int:
 	var count := 0
-	for entry in query_nearby(kind, position, radius):
+	var entries := query_nearby(kind, position, radius) if read_index == null else read_index.query(kind, position, radius)
+	for entry in entries:
 		if ground_route_distance(position, entry["position"], radius) <= radius:
 			count += 1
 	return count
@@ -1375,8 +1826,78 @@ func debug_entity(kind: String, entity_id: int) -> Dictionary:
 		"nearby": nearby,
 		"terrain": terrain_debug(entity["position"]),
 		"refuge_position": entity.get("refuge_position", Vector2.INF),
+		"home_position": entity.get("home_position", Vector2.INF),
+		"home_hungry_time": float(entity.get("home_hungry_time", 0.0)),
 		"route_waypoints": Array(entity.get("route_waypoints", [])).duplicate(),
 		"route_ford": entity.get("route_ford", Vector2.INF),
 		"route_distance": float(entity.get("route_distance", 0.0)),
 		"route_direct_distance": float(entity.get("route_direct_distance", 0.0)),
 	}
+
+func animal_snapshot(kind: String, entity_id: int, include_birth_status: bool = true) -> Dictionary:
+	var source: Dictionary = rabbits if kind == "rabbit" else foxes
+	if kind not in ["rabbit", "fox"] or not source.has(entity_id):
+		return {}
+	var entity: Dictionary = source[entity_id]
+	var cfg: Dictionary = config[kind]
+	var hunger_ratio := float(entity["hunger"]) / maxf(1.0, float(cfg["starvation_threshold"]))
+	var hunger_state := "Comfortable"
+	if float(entity["hunger"]) >= float(cfg["starvation_threshold"]):
+		hunger_state = "Starving"
+	elif float(entity["hunger"]) >= float(cfg.get("hunger_warning_at", cfg.get("hunt_at", 50.0))):
+		hunger_state = "Needs food"
+	elif float(entity["hunger"]) >= float(cfg.get("hungry_at", cfg.get("hunt_at", 30.0))):
+		hunger_state = "Looking for food"
+	var stage := "Young" if float(entity["age"]) < float(cfg["adult_age"]) else "Adult"
+	if float(entity["age"]) >= float(entity["lifespan"]) * 0.78:
+		stage = "Elder"
+	var parent_names: Array[String] = []
+	for parent_id in entity.get("parent_ids", []):
+		if source.has(parent_id):
+			parent_names.append(str(source[parent_id].get("name", "%s #%d" % [kind.capitalize(), parent_id])))
+		else:
+			parent_names.append(str(death_snapshot(kind, int(parent_id)).get("name", "A former meadow parent")))
+	var snapshot := {
+		"id": entity_id,
+		"kind": kind,
+		"name": str(entity.get("name", "%s #%d" % [kind.capitalize(), entity_id])),
+		"stage": stage,
+		"age": float(entity["age"]),
+		"lifespan": float(entity["lifespan"]),
+		"age_ratio": float(entity["age"]) / maxf(0.001, float(entity["lifespan"])),
+		"starvation_time": float(entity["starvation_time"]),
+		"alive": true,
+		"hunger_state": hunger_state,
+		"hunger_ratio": hunger_ratio,
+		"behavior": str(entity["behavior"]),
+		"activity": _public_activity(kind, str(entity["behavior"])),
+		"parent_names": parent_names,
+		"offspring_count": Array(entity.get("offspring_ids", [])).size(),
+		"meals": int(entity.get("meals", 0)),
+		"hunts": int(entity.get("hunts", 0)),
+		"recent_event": str(entity.get("recent_event", "Exploring the meadow")),
+		"position": entity["position"],
+		"home_position": entity.get("home_position", Vector2.INF),
+	}
+	if kind == "rabbit" and include_birth_status:
+		snapshot["birth_status"] = rabbit_birth_status(entity_id)
+	return snapshot
+
+func _public_activity(kind: String, behavior: String) -> String:
+	if kind == "rabbit":
+		return {
+			"wander": "Exploring",
+			"forage": "Searching for forage",
+			"seek_food": "Heading to food",
+			"eat": "Eating",
+			"loaf": "Resting near home",
+			"socialize": "Resting with the colony",
+			"observe": "Watching the meadow",
+			"shift": "Finding a resting spot",
+			"return_home": "Returning home",
+			"flee": "Fleeing to safety",
+		}.get(behavior, "Exploring")
+	return {
+		"wander": "Patrolling woodland",
+		"hunt": "Tracking prey",
+	}.get(behavior, "Exploring")

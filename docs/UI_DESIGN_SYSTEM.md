@@ -28,13 +28,13 @@ The HUD remains runtime-built because its contents and unlock set are dynamic. R
 
 ### In-world objective observability
 
-The Objective Lens complements the checkpoint shell when a criterion depends on identity or spatial history that is difficult to read directly in the biome. `RunDirector.objective_lens_snapshot()` is the player-safe evidence boundary: it exposes semantic entity attention, recorded places, and new evidence events while withholding evaluator radii and optimal destinations. `rendering/objective_lens.gd` owns diffing, fades, and event deduplication; `WorldView` owns the restrained world-space drawing primitives.
+The Objective Lens complements the checkpoint shell when a criterion depends on identity or spatial grouping that is difficult to read directly in the biome. `RunDirector.objective_lens_snapshot()` is the player-safe evidence boundary: it exposes semantic entity attention, recognized nursery centers, and new evidence events while withholding evaluator radii and optimal destinations. `rendering/objective_lens.gd` owns diffing, fades, and event deduplication; `WorldView` owns the restrained world-space drawing primitives.
 
-The projection is criterion-driven rather than checkpoint-driven. Current primitives cover evaluator-recognized offspring states, distinct birthplaces, and live nursery groups. Nursery markers use a fixed-size organic cradle and a literal numbered cream plaque so they remain distinct from individual hunger rings and remembered birthplace symbols. A renderer must never inspect a checkpoint ID or independently reproduce age, feeding, grouping, or separation rules. Exact constants remain development-debug information.
+The projection is criterion-driven rather than checkpoint-driven. Current primitives cover the one evaluator-recognized young-forager state and live nursery groups; old birthplace proof is deliberately absent from the six-act progression. Nursery markers use a fixed-size organic cradle and a literal numbered cream plaque so they remain distinct from individual hunger rings and animal-selection symbols. A renderer must never inspect a checkpoint ID or independently reproduce age, feeding, grouping, or separation rules. Exact constants remain development-debug information.
 
 ### Terrain framing and world-space legibility
 
-The playfield is presented as a terrain window rather than a raised globe that must remain fully visible. At desktop aspect ratios the playable edge slightly overscans the viewport, and the surrounding unrevealed ground uses a muted terrain tone instead of empty void. The first four completed checkpoints each reveal one persistent terrain band; `Main` eases the camera toward the new fit slowly enough that geography accumulates rather than arriving as a single overview cut.
+The playfield is presented as a terrain window rather than a raised globe that must remain fully visible. At desktop aspect ratios the playable edge slightly overscans the viewport, and the surrounding unrevealed ground uses a muted terrain tone instead of empty void. The first five completed acts each reveal a persistent terrain band; `Main` eases the camera toward the new fit slowly enough that geography accumulates rather than arriving as a single overview cut.
 
 Rabbits, foxes, forage patches, placement previews, and Objective Lens markers use bounded camera-aware presentation scaling. Their simulation positions, perception ranges, grouping radii, and placement rules remain in world units and do not change. The compensation preserves most—not all—of their screen size as the terrain grows, so the wider ecosystem is perceptible without reducing actionable pieces to specks.
 
@@ -112,11 +112,11 @@ Buttons define default, hover, pressed, focus, and disabled states centrally. Re
 
 ### Checkpoint information architecture
 
-The checkpoint shell is intentionally scan-first. It keeps the checkpoint eyebrow, title, short summary, and no more than five compact rows, including `All goals together`. Ordered cycles remain one goal row with current/total progress and the next event in its visible value. `NEXT MOVE · UPDATES LIVE` gives one reactive action below the rows. Every row also owns a keyboard- and touch-accessible `?` control that opens its fixed rule explanation. `How progress works` opens the stable checkpoint-wide model. The hold bar remains as a quiet visual cue below the rows.
+The checkpoint shell is intentionally scan-first. It keeps the checkpoint eyebrow, title, short summary, and no more than five compact rows, including `All goals together`. The final ecology window combines birth and hunt counts in one row without prescribing event order. `NEXT MOVE · UPDATES LIVE` gives one reactive action below the rows. Every row also owns a keyboard- and touch-accessible `?` control that opens its fixed rule explanation. `How progress works` opens the stable checkpoint-wide model. The hold bar remains as a quiet visual cue below the rows.
 
-Checkpoint design also follows a freshness rule: on entering checkpoints 2–5, at most one live-state condition may already be fulfilled. Birth, feeding, location, hunter identity, and ordered-cycle evidence is checkpoint-local and resets at the transition. This prevents a completed checkpoint from passively completing the next one.
+Checkpoint design follows a relevance rule: event evidence is local to the act when the event is the new lesson, while useful living habitat carries forward. The First Family is the sole young-foraging proof; the next two acts build homes from that generation. The final act intentionally synthesizes recent births, hunts, nursery state, prey ratio, and hunger in a rolling window.
 
-Rule explanations are objective-scoped reference material and remain stable for the lifetime of a checkpoint. Each explainer identifies its persistence behavior: live counts can rise or fall, living credit can fall when the counted animal dies, saved evidence remains for the checkpoint, ordered cycles lock when complete, and the simultaneous hold resets when any live requirement drops. Live population, evidence, hunger, decline, and stabilization phases may update `NEXT MOVE`, goal values, and semantic colors, but they never select or replace an open explainer. Explanation copy stays in the checkpoint card's normal content flow rather than a nested scroll region.
+Rule explanations are objective-scoped reference material and remain stable for the lifetime of a checkpoint. Each explainer identifies its persistence behavior: live counts can rise or fall, living credit can fall when the counted animal dies, saved evidence remains for the checkpoint, recent-window evidence expires, and the simultaneous hold resets when any live requirement drops. Live population, evidence, hunger, decline, and stabilization phases may update `NEXT MOVE`, goal values, and semantic colors, but they never select or replace an open explainer. Explanation copy stays in the checkpoint card's normal content flow rather than a nested scroll region.
 
 Every rule that can stop checkpoint completion is visible in the row itself. Quantitative rows use a compact current/target format with the unit at the end, such as `0/6 rabbits`, `1/2 foxes`, or `0/4 sec`. Internal trend thresholds are translated into the player-facing `Stable`, `Under pressure`, and `Falling fast` colony states; their tuning percentages do not appear in the normal HUD. Rabbit/Fox hunger remain short, color-coded `Fed`, `Hungry`, and `Starving` states, while tooltips and the optional hint can provide plain-language recovery actions. Population and animal-specific rows retain the rabbit or fox glyph for fast recognition; F3 remains reserved for raw evaluator diagnostics.
 
@@ -129,9 +129,10 @@ Every rule that can stop checkpoint completion is visible in the row itself. Qua
 | `born_rabbit_fed` | surviving young rabbits fed / configured target |
 | `distinct_foxes_fed` | distinct living foxes fed / configured target |
 | `safe_havens` | current viable nurseries / configured minimum groups |
-| `separated_birth_zones` | separated birthplaces / configured target |
 | `prey_per_fox` | current rabbits per living fox / configured target |
-| `ordered_cycle` | one current/total row; tooltip names the next fox-hunt or rabbit-birth step |
+| `productive_forages` | usable plant types in fair-or-better habitat / configured target |
+| `population_recovery` | current Rabbits / population when the act opened (with a configured floor) |
+| `ecology_window` | recent births and hunts plus live Rabbit/Fox minimums, with no forced order |
 | species health | separate Rabbit/Fox `Fed`, `Hungry`, or `Starving` live state |
 | rabbit trend | `Stable`, `Under pressure`, or `Falling fast` colony state |
 
@@ -156,7 +157,7 @@ The project uses a 1280×800 canvas base, `canvas_items` stretch, and `expand` a
 
 Manual geometry remains only where it expresses screen orchestration or motion rather than ordinary component layout:
 
-- `_layout_interface()` places the top-level objective, population, supply, inventory, speed, toast, critical, reward, peek, debug, and ending roots against the current viewport.
+- `_layout_interface()` places the top-level objective, population, supply, Meadow Moments, animal field note, inventory/action strip, speed, toast, critical, reward, peek, debug, and ending roots against the current viewport.
 - Inventory refresh resizes the outer satchel root to the number of unlocked cards; the cards and all satchel content remain container-managed.
 - Reward-sheet and toast entrance animations set a temporary root position, pivot, scale, and modulate before tweening to the responsive target.
 - `EntityGlyph` and `RewardBurst` own illustration/draw geometry; glyph minimum sizes are part of their visual contract.
@@ -167,7 +168,7 @@ These exceptions must not spread into label, badge, card, objective-row, toast-c
 
 Rendered validation covered 1280×800, 1440×900, and 1920×1080. The first render exposed touching top-panel shadows and truncated inventory names; the status group was given a minimum gap and inventory cards were widened so `Carrot patch` and `Berry bush` remain intact. Hardening captures additionally covered selected and unavailable inventory, reward focus, hover and disabled states, the paused-meadow peek HUD, critical messaging, and deliberately long objective copy.
 
-The focused checkpoint iteration keeps the 360px shell content-sized, right-aligned statuses readable, and rabbit/fox glyphs available for quick scanning. Automated progression coverage renders all five checkpoints, verifies every structured blocker maps to a live row, and enforces the five-row maximum.
+The focused checkpoint iteration keeps the 360px shell content-sized, right-aligned statuses readable, and rabbit/fox glyphs available for quick scanning. Automated progression coverage renders all six checkpoints, verifies every structured blocker maps to a live row, and enforces the five-row maximum. The desktop right rail adds a three-line Meadow Moments feed and a content-sized animal field note; the feed is hidden below the compact breakpoint.
 
 Migration completion removed all 16 numeric production `_make_label` calls, the numeric compatibility helper, all 19 local color overrides, all 10 local StyleBox overrides, and the three `GameHUD._flat_style` references. Production `GameHUD` and components now contain zero font-size, color, or StyleBox override calls and zero StyleBox constructors. All remaining StyleBox, corner, border, and shadow declarations are centralized in `BiomeTheme`. Compound reward, shortcut-badge, peek-button, checkpoint, and inventory-selection layout is container-backed. The 17 remaining direct geometry assignments are 14 responsive root-position branches, one dynamic inventory-root width, and two entrance-animation positions, all covered by the exceptions above.
 

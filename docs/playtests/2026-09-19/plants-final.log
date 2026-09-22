@@ -1,0 +1,18 @@
+ERROR: Failed to open 'user://logs/godot2026-09-19T01.02.51.log'.
+   at: copy (core/io/dir_access.cpp:429)
+ERROR: Failed to open log file for writing: user://logs/godot.log
+   at: rotate_file (core/io/logger.cpp:169)
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+ERROR: Condition "ret != noErr" is true. Returning: ""
+   at: get_system_ca_certificates (platform/macos/os_macos.mm:1035)
+
+PLANT ECOLOGY A · Sustainable use: { "feeding_events": 603, "depletions": 0, "minimum_ratio": 0.69, "survivors": 2, "final_state": "abundant" }
+PLANT ECOLOGY B/D · Overgrazing and two-region redistribution: { "depleted": true, "depleted_at": 2.3, "recovered": true, "recovered_at": 17.4, "fed_at_alternative": true, "entered_alternative_region": true, "feeding_resumed_at_origin": true, "abandoned_while_latched": true, "recovery_seconds": 15.1, "survivors": 8 }
+PLANT ECOLOGY C · No alternative food: { "depleted": true, "starvation_losses": 12, "survivors": 0, "final_state": "depleted" }
+PLANT ECOLOGY · Berry recovery window: { "recovered": true, "recovery_seconds": 30.8, "state": "healthy" }
+Plant ecology scenarios passed: sustainable pressure, durable depletion, redistribution, recovery, and starvation all emerged from normal Rabbit behavior.
+WARNING: 10 ObjectDB instances were leaked at exit (run with `--verbose` for details).
+   at: cleanup (core/object/object.cpp:2536)
+ERROR: 4 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:822)

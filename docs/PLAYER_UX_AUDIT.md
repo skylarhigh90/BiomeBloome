@@ -1,10 +1,12 @@
 # Player guidance UX audit
 
+> V0.6 update: the ordered food-web sequences discussed in this historical audit have been replaced by outcome-based hunt, birth, recovery, and rolling-window criteria. Current behavior is documented in `README.md` and `V0.6_GAMEPLAY_REPORT.md`.
+
 ## Outcome
 
 The checkpoint card now separates three different player needs:
 
-1. **What the checkpoint is asking for** — title, plain-language summary, and complete goal list.
+1. **What the checkpoint is asking for** — title, plain-language summary, and complete outcome list.
 2. **What a term means** — a fixed `?` explainer on every goal, available before that goal is reached.
 3. **What to do next** — one reactive `NEXT MOVE · UPDATES LIVE` instruction.
 

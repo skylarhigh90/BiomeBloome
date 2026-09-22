@@ -14,7 +14,7 @@ func _process(_delta: float) -> bool:
 		# The seeded Stream can move through earlier fixed smoke-test coordinates.
 		# Resolve nearby playable points so this remains a renderer/HUD smoke test;
 		# placement rejection itself is covered by terrain_runner.gd.
-		game.systems.place_item("berry_bush", _placeable_near("berry_bush", Vector2(-90.0, 70.0)))
+		game.systems.simulation.add_plant("berry_bush", _ground_near(Vector2(-90.0, 70.0)), "visual_test")
 		game.systems.place_item("carrot_patch", _placeable_near("carrot_patch", Vector2(90.0, 70.0)))
 		game.systems.place_item("rabbit", _placeable_near("rabbit", Vector2(-45.0, -55.0)))
 		game.systems.place_item("rabbit", _placeable_near("rabbit", Vector2(45.0, -55.0)))
@@ -42,3 +42,12 @@ func _placeable_near(item: String, preferred: Vector2) -> Vector2:
 			if game.systems.can_place(item, candidate):
 				return candidate
 	return Vector2.INF
+
+func _ground_near(preferred: Vector2) -> Vector2:
+	for ring in range(8):
+		var radius := float(ring) * 18.0
+		for spoke in range(16):
+			var candidate := preferred + Vector2.from_angle(float(spoke) / 16.0 * TAU) * radius
+			if game.systems.simulation.is_position_valid(candidate):
+				return candidate
+	return Vector2.ZERO

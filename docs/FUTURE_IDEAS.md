@@ -1,9 +1,10 @@
-# Future ideas (deliberately not in V0.4)
+# Future ideas after the V0.6 gameplay pass
+
+Completed in V0.6: timed placement undo, earned plant Transplant charges, predictive placement quality, named animal field notes, lineage, animal following, a Meadow Moments feed, and procedural audio feedback.
 
 - Save/load for long-running sandbox ecosystems.
 - Additional terrain mechanics such as thirst, swimming, floods, wetlands, bridges, and player-built crossings only after V0.4's geography proves satisfying.
-- Optional animal relocation or undo only if playtesting shows irreversible placement prevents useful experimentation.
-- Additional species only after rabbits, foxes, carrot patches, and berry bushes produce understandable local stories on their own.
-- A persistent Field Guide and hidden emergent arrivals only after V0.4's terrain-aware ecological arc proves durable in broader playtesting.
+- Additional species only after the new field notes and event feed prove that rabbits and foxes already produce understandable local stories in external playtests.
+- A persistent Field Guide, saved favorite animals, and hidden emergent arrivals after the current lightweight lineage layer proves durable.
 
-V0.4 intentionally excludes additional species, hazards, weather, seasons, disease, terrain mutation, currency, shops, progression trees, persistence, accounts, and multiplayer.
+The current build intentionally excludes additional species, hazards, weather, seasons, disease, terrain mutation, currency, shops, progression trees, persistence, accounts, and multiplayer. The next validation target is player comprehension and retention, not more breadth.

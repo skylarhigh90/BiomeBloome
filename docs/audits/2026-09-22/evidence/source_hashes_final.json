@@ -1,0 +1,13 @@
+{
+  "project.godot": "96e84e8bd282b8712ebf40d8f911095276a3d86184888c83d7d79548b458cda7",
+  "rendering/world_view.gd": "52290d27801b42b6594441141596d66cc7026fce9ca16065e6036a5aff2e2f21",
+  "simulation/ecosystem_simulation.gd": "bcb6db4d17344e0182a84b81fb31baa1a593f8b7d0332b5c8011ce40d7ba4521",
+  "simulation/temperate_wilds_terrain.gd": "8c7c375a24bafedc51a62cfb0975674eefdf628b239355153c7971b9cb042f27",
+  "config/game_config.gd": "9a83b0a04c9b1678061827641c24691ac1b4275cc6f5dc1da1ed710fca217b40",
+  "game/main.gd": "293a73dabaf182367a5d3f761a0e0207912a033c0538faa07c35de607c98db90",
+  "game/game_systems.gd": "8c53a0113aca652c40c1b84e9ba9eabae3aa65d726ed1c465c6255f32bc04ef8",
+  "tests/activity_runner.gd": "05f4adaa977cdfef8cecfe2971ba2c299feff3acb7fcdf87c404b8e256383099",
+  "assets/environment/conifer_atlas.png": "3370d3bb5bdbf52f7fcda9a1613a6d6b1116c4220a974b1db439158e73c24efa",
+  "assets/environment/meadow_ground.png": "21dee28acccbe27e87266880eba995a33788ced8b95378a058655297fb9b04d2",
+  "assets/environment/stream_water.png": "caf6204f93c08703b232558b845db5f6bfa8db8cf814c1dd111c90483a3feb4b"
+}

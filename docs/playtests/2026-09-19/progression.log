@@ -1,0 +1,50 @@
+ERROR: Failed to open 'user://logs/godot2026-09-19T00.54.53.log'.
+   at: copy (core/io/dir_access.cpp:429)
+ERROR: Failed to open log file for writing: user://logs/godot.log
+   at: rotate_file (core/io/logger.cpp:169)
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+ERROR: Condition "ret != noErr" is true. Returning: ""
+   at: get_system_ca_certificates (platform/macos/os_macos.mm:1035)
+PASS: the run uses six distinct acts, no forced event order, and at most five visible goals
+PASS: the opening teaches one animal and one forage type before adding complexity
+PASS: The First Meal requires three distinct living founders to eat
+PASS: The First Family teaches births and one young forager without geography repetition
+PASS: Two Lasting Homes requires both separated groups and productive Carrot/Berry habitat
+PASS: A Nursery Network adds one new home and carries prior living work forward
+PASS: Hunt and Recover accepts births before hunts and credits two individual foxes
+PASS: recovery restores the population present when the predator act opened
+PASS: the final ecology proof is a genuinely recent window rather than permanent event credit
+PASS: Living Balance accepts hunts before births and measures the combined outcome
+PASS: Objective Lens follows the one taught young-forager journey
+PASS: Objective Lens displays exactly the nursery groups counted by progression
+PASS: Objective Lens deduplicates moments and cleans up when an act changes
+PASS: a nursery needs usable nearby food without a hidden biomass quota
+PASS: nursery evidence supports three mutually separated local groups
+PASS: every act pays out an unlock, tool charge, predator arrival, or persistent terrain reveal
+PASS: timed undo cleanly restores the last placement to the satchel
+PASS: undo expires after five real seconds even while simulation time is paused
+PASS: placement preview turns terrain suitability into a readable quality decision
+PASS: transplant corrects a poor site with a biomass cost and limited charge
+PASS: every animal exposes a stable name, life stage, needs, activity, and personal history
+PASS: a newborn links to both named parents and both parents retain the child in their lineage
+PASS: clicking an animal exposes its named family note and a working follow action
+PASS: the ecology feed records named arrivals and meaningful life moments
+PASS: original procedural ambience and distinct action, ecology, reward, and danger cues are available and mutable
+PASS: supplies retain three stage-sensitive pools and plant-heavy late support
+PASS: when a two-fox objective is active, Meadow Mail always offers a fox replacement
+PASS: Critical remains dormant until the Nursery Network is established
+PASS: loss of breeding recovery capacity enters Critical and returns speed to 1×
+PASS: fox extinction alone does not trigger Critical or Game Over
+PASS: the blocking supply chooser pauses the Critical grace timer
+PASS: the guaranteed late Fox replacement never displaces the first Critical rabbit rescue
+PASS: a restored breeding group must remain alive through a settling period
+PASS: an unrecovered Critical state still ends the run
+PASS: checkpoint HUD exposes every blocker in five rows or fewer and summarizes the outcome window
+PASS: every checkpoint goal retains a stable on-demand explainer
+PASS: player-facing progression consistently calls viable rabbit groups nurseries
+PASS: minor, major, and final rewards use distinct celebration emphasis
+PASS: completion replaces checkpoint rows with a live sandbox observation goal
+PASS: a new ecosystem resets all six acts, unlocks, tools, and simulation state
+
+40 focused progression and interaction tests passed; 0 failed.

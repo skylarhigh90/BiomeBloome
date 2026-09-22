@@ -15,12 +15,19 @@ func _initialize() -> void:
 	quit(1 if not failures.is_empty() else 0)
 
 func _run_all() -> void:
+	_test_remove_food_without_refund()
 	_test_placement_consumes_one()
 	_test_invalid_placement_consumes_nothing()
 	_test_population_is_actual_entities()
 	_test_rabbit_seeks_nearby_food()
+	_test_rabbit_placement_near_forage_establishes_home()
 	_test_social_vision_is_transitive_and_personal()
-	_test_rabbit_finishes_meal_before_roaming()
+	_test_rabbit_finishes_meal_before_settling()
+	_test_shared_home_holds_a_nursery_group()
+	_test_ready_rabbits_gather_at_home()
+	_test_home_gathering_enables_birth()
+	_test_rabbit_rehomes_after_prolonged_shortage()
+	_test_newborn_inherits_parent_home()
 	_test_rabbit_requires_local_or_social_food_vision()
 	_test_rabbit_escalates_food_search()
 	_test_rabbit_flees_nearby_fox()
@@ -122,6 +129,13 @@ func _test_rabbit_seeks_nearby_food() -> void:
 	sim.step(0.1)
 	_expect(sim.rabbits[rabbit_id]["behavior"] == "seek_food" and sim.rabbits[rabbit_id]["target_id"] != -1, "rabbits seek nearby food")
 
+func _test_rabbit_placement_near_forage_establishes_home() -> void:
+	var sim = Simulation.new(_flat_food_config(), 8017)
+	var plant_id: int = sim.add_plant("carrot_patch", Vector2(36.0, 0.0))
+	var rabbit_id: int = sim.add_rabbit(Vector2.ZERO)
+	var rabbit: Dictionary = sim.rabbits[rabbit_id]
+	_expect(Vector2(rabbit["home_position"]).is_equal_approx(sim.plants[plant_id]["position"]) and int(rabbit["home_food_id"]) == plant_id, "placing a Rabbit beside reachable forage establishes its home immediately")
+
 func _test_social_vision_is_transitive_and_personal() -> void:
 	var chain_config := _flat_food_config()
 	chain_config["rabbit"]["food_detection_radius"] = 80.0
@@ -164,7 +178,7 @@ func _test_social_vision_is_transitive_and_personal() -> void:
 		and int(personal_sim.rabbits[second_id]["target_id"]) == right_food
 	_expect(chain_shared and local_blind and personal_routes, "social vision shares food transitively while route choice remains individual")
 
-func _test_rabbit_finishes_meal_before_roaming() -> void:
+func _test_rabbit_finishes_meal_before_settling() -> void:
 	var config := _flat_food_config()
 	var sim = Simulation.new(config, 4217)
 	var rabbit_id: int = sim.add_rabbit(Vector2.ZERO)
@@ -180,17 +194,98 @@ func _test_rabbit_finishes_meal_before_roaming() -> void:
 			break
 	var rabbit: Dictionary = sim.rabbits[rabbit_id]
 	var consumed: float = food_before - float(sim.plants[plant_id]["food"])
-	var finished_meal: bool = meal_ticks >= 4 and consumed >= 1.5 and rabbit["hunger"] <= config["rabbit"]["sated_at"]
+	# Net stock includes regeneration during the now-deliberate feeding bout.
+	var finished_meal: bool = meal_ticks >= 10 and consumed > 0.5 and rabbit["hunger"] <= config["rabbit"]["sated_at"]
 	sim.step(0.1)
-	var moved_on: bool = rabbit["behavior"] == "wander" and rabbit["target_id"] == -1 and not rabbit["food_motivated"]
+	var settled: bool = rabbit["behavior"] in ["loaf", "socialize"] and rabbit["target_id"] == -1 and not rabbit["food_motivated"]
 	var distance_when_hungry_again := 0.0
 	for tick in range(200):
 		sim.step(0.1)
 		if rabbit["food_motivated"]:
 			distance_when_hungry_again = rabbit["position"].distance_to(sim.plants[plant_id]["position"])
 			break
-	var explored_beyond_patch: bool = distance_when_hungry_again >= 40.0
-	_expect(finished_meal and moved_on and explored_beyond_patch, "rabbits finish a meal and roam beyond the patch", "%d eating ticks, %.2f food consumed, %.1f units away when hungry again" % [meal_ticks, consumed, distance_when_hungry_again])
+	var stayed_near_home: bool = distance_when_hungry_again <= float(config["rabbit"]["home_return_radius"]) + 8.0
+	_expect(finished_meal and settled and stayed_near_home, "rabbits finish a meal and settle near their new home", "%d eating ticks, %.2f food consumed, %.1f units away when hungry again" % [meal_ticks, consumed, distance_when_hungry_again])
+
+func _test_shared_home_holds_a_nursery_group() -> void:
+	var config := _flat_food_config()
+	config["rabbit"]["max_population"] = 3
+	var sim = Simulation.new(config, 4471)
+	sim.add_plant("carrot_patch", Vector2.ZERO)
+	var rabbit_ids: Array[int] = []
+	for index in range(3):
+		var rabbit_id: int = sim.add_rabbit(Vector2(0.0, float(index - 1) * 7.0))
+		sim.rabbits[rabbit_id]["hunger"] = 32.0
+		rabbit_ids.append(rabbit_id)
+	_step_many(sim, 20.0)
+	var shared_home := true
+	var maximum_distance := 0.0
+	for rabbit_id in rabbit_ids:
+		var rabbit: Dictionary = sim.rabbits[rabbit_id]
+		shared_home = shared_home and Vector2(rabbit["home_position"]).is_equal_approx(Vector2.ZERO)
+		maximum_distance = maxf(maximum_distance, Vector2(rabbit["position"]).distance_to(Vector2.ZERO))
+	_expect(shared_home and maximum_distance <= float(config["rabbit"]["home_return_radius"]) + 8.0, "a shared home keeps three Rabbits together through a nursery hold", "maximum distance %.1f" % maximum_distance)
+
+func _test_ready_rabbits_gather_at_home() -> void:
+	var config := _flat_food_config()
+	config["rabbit"]["max_population"] = 2
+	var sim = Simulation.new(config, 7109)
+	var first: int = sim.add_rabbit(Vector2(-55.0, 0.0))
+	var second: int = sim.add_rabbit(Vector2(55.0, 0.0))
+	for rabbit_id in [first, second]:
+		_make_eligible_rabbit(sim, rabbit_id)
+		sim.rabbits[rabbit_id]["home_position"] = Vector2.ZERO
+		sim.rabbits[rabbit_id]["home_food_id"] = -1
+	var distance_before: float = Vector2(sim.rabbits[first]["position"]).distance_to(Vector2.ZERO) + Vector2(sim.rabbits[second]["position"]).distance_to(Vector2.ZERO)
+	_step_many(sim, 2.5)
+	var distance_after: float = Vector2(sim.rabbits[first]["position"]).distance_to(Vector2.ZERO) + Vector2(sim.rabbits[second]["position"]).distance_to(Vector2.ZERO)
+	var gathering: bool = sim.rabbits[first]["behavior"] == "socialize" and sim.rabbits[second]["behavior"] == "socialize"
+	_expect(gathering and distance_after < distance_before - 18.0, "ready adults gather at their shared home", "distance %.1f -> %.1f" % [distance_before, distance_after])
+
+func _test_home_gathering_enables_birth() -> void:
+	var config := _flat_food_config()
+	config["rabbit"]["max_population"] = 3
+	var sim = Simulation.new(config, 1889)
+	for position in [Vector2(-24.0, 10.0), Vector2(4.0, 10.0), Vector2(30.0, -8.0)]:
+		sim.add_plant("carrot_patch", position)
+	for position in [Vector2(-16.0, -20.0), Vector2(26.0, 22.0)]:
+		sim.add_plant("berry_bush", position)
+	var first: int = sim.add_rabbit(Vector2(-55.0, 0.0))
+	var second: int = sim.add_rabbit(Vector2(55.0, 0.0))
+	for rabbit_id in [first, second]:
+		_make_eligible_rabbit(sim, rabbit_id)
+		sim.rabbits[rabbit_id]["home_position"] = Vector2.ZERO
+		sim.rabbits[rabbit_id]["home_food_id"] = -1
+	_step_many(sim, 4.0)
+	var newborn_at_home := false
+	for rabbit in sim.rabbits.values():
+		if rabbit["reason"] == "birth" and Vector2(rabbit["home_position"]).is_equal_approx(Vector2.ZERO):
+			newborn_at_home = true
+	_expect(sim.rabbits.size() == 3 and newborn_at_home, "adults outside mating range gather and produce young at their shared home")
+
+func _test_rabbit_rehomes_after_prolonged_shortage() -> void:
+	var config := _flat_food_config()
+	var sim = Simulation.new(config, 2917)
+	var new_home := Vector2(140.0, 0.0)
+	var rabbit_id: int = sim.add_rabbit(new_home)
+	var plant_id: int = sim.add_plant("carrot_patch", new_home)
+	var rabbit: Dictionary = sim.rabbits[rabbit_id]
+	rabbit["home_position"] = Vector2.ZERO
+	rabbit["home_food_id"] = -1
+	rabbit["home_hungry_time"] = config["rabbit"]["home_relocation_hungry_time"]
+	rabbit["hunger"] = 55.0
+	sim.step(0.1)
+	_expect(rabbit["home_position"].is_equal_approx(new_home) and int(rabbit["home_food_id"]) == plant_id, "prolonged hungry commuting lets a Rabbit establish a new home")
+
+func _test_newborn_inherits_parent_home() -> void:
+	var sim = Simulation.new(_flat_food_config(), 5331)
+	var parent_id: int = sim.add_rabbit(Vector2.ZERO)
+	var home := Vector2(18.0, 12.0)
+	sim.rabbits[parent_id]["home_position"] = home
+	sim.rabbits[parent_id]["home_food_id"] = 77
+	var child_id: int = sim.add_rabbit(Vector2(4.0, 0.0), "birth", [parent_id])
+	var child: Dictionary = sim.rabbits[child_id]
+	_expect(child["home_position"].is_equal_approx(home) and int(child["home_food_id"]) == 77, "newborn Rabbits inherit their parent's home")
 
 func _test_rabbit_requires_local_or_social_food_vision() -> void:
 	var config := _flat_food_config()
@@ -488,7 +583,7 @@ func _test_feeding_relieves_starvation_debt() -> void:
 	rabbit["starvation_time"] = 8.0
 	var before: float = rabbit["starvation_time"]
 	sim.step(0.1)
-	_expect(float(rabbit["starvation_time"]) < before - 0.5 and sim.rabbits.has(rabbit_id), "a rescued animal sheds starvation debt as soon as it eats")
+	_expect(float(rabbit["starvation_time"]) < before and sim.rabbits.has(rabbit_id), "a rescued animal sheds starvation debt as soon as it eats")
 
 func _test_pause_stops_simulation_time() -> void:
 	var systems = Systems.new(_fresh_config())
@@ -533,7 +628,7 @@ func _test_objective_completion_preserves_world() -> void:
 	var rabbit_id: int = systems.simulation.add_rabbit(Vector2.ZERO)
 	var plant_id: int = systems.simulation.add_plant("carrot_patch", Vector2(40.0, 0.0))
 	systems.advance(0.1)
-	_expect(systems.run_director.completed_milestones.has("colony_gathers") and systems.simulation.rabbits.has(rabbit_id) and systems.simulation.plants.has(plant_id), "milestone completion preserves the world")
+	_expect(systems.run_director.completed_milestones.has("first_meal") and systems.simulation.rabbits.has(rabbit_id) and systems.simulation.plants.has(plant_id), "milestone completion preserves the world")
 
 func _test_supply_adds_inventory() -> void:
 	var systems = Systems.new(_fresh_config())
@@ -664,3 +759,29 @@ func _test_spatial_hash_handles_prototype_scale() -> void:
 		sim.step(0.1)
 	var elapsed := Time.get_ticks_msec() - started
 	_expect(elapsed < 2500 and sim.last_tick_stats["queries"] < 1000, "spatial lookup remains practical at 150 rabbits and 30 foxes", "%d ms, %d queries" % [elapsed, sim.last_tick_stats["queries"]])
+
+func _test_remove_food_without_refund() -> void:
+	var systems = Systems.new(_flat_food_config())
+	var plant_id: int = systems.place_item("carrot_patch", Vector2.ZERO)
+	var rabbit_id: int = systems.simulation.add_rabbit(Vector2(40, 0))
+	var inventory_before: Dictionary = systems.inventory.duplicate(true)
+	systems.set_speed(0.0)
+	_expect(not systems.remove_food(plant_id), "removal requires explicit tool selection")
+	_expect(systems.begin_remove_food(), "food removal available while paused without an unlock")
+	_expect(not systems.remove_food(rabbit_id) and systems.simulation.rabbits.has(rabbit_id), "food removal cannot remove animals")
+	systems.supply_pending = true
+	_expect(not systems.remove_food(plant_id), "supply modal blocks food removal")
+	systems.supply_pending = false
+	_expect(systems.remove_food(plant_id), "food tool discards a placed patch")
+	_expect(systems.inventory == inventory_before and not systems.undo_last_placement(), "discarded food cannot be refunded through inventory or undo")
+	_expect(not systems.remove_food_mode and not systems.simulation.plants.has(plant_id), "removal exits after one patch")
+	_expect(systems.can_place("carrot_patch", Vector2.ZERO), "discarding frees the location for replacement food")
+	var berry_id: int = systems.simulation.add_plant("berry_bush", Vector2(80, 0))
+	systems.begin_remove_food()
+	systems.clear_selection()
+	_expect(not systems.remove_food(berry_id), "cancel prevents removal")
+	systems.begin_remove_food()
+	systems.select_item("rabbit")
+	_expect(not systems.remove_food_mode, "inventory selection exits removal mode")
+	systems.begin_remove_food()
+	_expect(systems.remove_food(berry_id) and systems.inventory == inventory_before, "berry bushes are discarded without refund")

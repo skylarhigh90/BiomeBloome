@@ -1,0 +1,86 @@
+{
+  "live": {
+    "seconds": 119.999999999997,
+    "watched": 5,
+    "samples": 1026,
+    "states": {
+      "wander": 1,
+      "seek_food": 61,
+      "eat": 48,
+      "loaf": 306,
+      "socialize": 610
+    },
+    "speeds": {
+      "wander": {
+        "median": 13.299999634262855,
+        "p95": 13.299999634262855,
+        "fraction_under_1": 0.0
+      },
+      "seek_food": {
+        "median": 33.62589384971739,
+        "p95": 42.65747233185352,
+        "fraction_under_1": 0.0
+      },
+      "eat": {
+        "median": 39.836615292111944,
+        "p95": 46.00426090847408,
+        "fraction_under_1": 0.0
+      },
+      "loaf": {
+        "median": 5.060092023138388,
+        "p95": 8.882372090512895,
+        "fraction_under_1": 0.032679738562091505
+      },
+      "socialize": {
+        "median": 4.833573110927484,
+        "p95": 11.871887575537299,
+        "fraction_under_1": 0.04426229508196721
+      }
+    },
+    "eat_bouts": 18,
+    "median_eat_bout": 0.29999999999999893,
+    "within18units_fraction": 0.564327485380117
+  },
+  "live2": {
+    "seconds": 89.3999999999992,
+    "watched": 6,
+    "samples": 726,
+    "states": {
+      "wander": 1,
+      "seek_food": 69,
+      "eat": 33,
+      "loaf": 56,
+      "socialize": 567
+    },
+    "speeds": {
+      "wander": {
+        "median": 13.299999634262855,
+        "p95": 13.299999634262855,
+        "fraction_under_1": 0.0
+      },
+      "seek_food": {
+        "median": 33.32671455203906,
+        "p95": 41.357635169479636,
+        "fraction_under_1": 0.0
+      },
+      "eat": {
+        "median": 40.31862457241363,
+        "p95": 42.22740766736827,
+        "fraction_under_1": 0.0
+      },
+      "loaf": {
+        "median": 6.254196706954762,
+        "p95": 10.903130159977081,
+        "fraction_under_1": 0.0
+      },
+      "socialize": {
+        "median": 7.734536900021289,
+        "p95": 14.057857290210425,
+        "fraction_under_1": 0.0
+      }
+    },
+    "eat_bouts": 13,
+    "median_eat_bout": 0.3000000000000007,
+    "within18units_fraction": 0.22176308539944903
+  }
+}
